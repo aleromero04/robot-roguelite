@@ -10,13 +10,11 @@ export class GameScene extends Phaser.Scene {
   private player!: Player
   private enemies!: Phaser.GameObjects.Group
   private lastShotTime = 0
-  private readonly shotCooldown = 500
   private projectiles!: Phaser.GameObjects.Group
   private healthText!: Phaser.GameObjects.Text
   private waveText!: Phaser.GameObjects.Text
   private state: GameState = 'START'
   private currentWave: 1 | 2 = 1
-  private selectedUpgradeIds: string[] = []
 
   constructor() {
     super('GameScene')
@@ -47,7 +45,7 @@ export class GameScene extends Phaser.Scene {
     this.player = new Player(this, 400, 300)
     this.enemies = this.add.group()
     this.projectiles = this.add.group()
-    this.healthText = this.add.text(16, 16, `HP: ${this.player.getHealth()}`, {
+    this.healthText = this.add.text(16, 16, `HP: ${this.player.getHealth()} / ${this.player.getMaxHealth()}`, {
       fontSize: '24px',
       color: '#ffffff',
     }).setDepth(1)
@@ -63,7 +61,7 @@ export class GameScene extends Phaser.Scene {
         return
       }
 
-      this.healthText.setText(`HP: ${this.player.getHealth()}`)
+      this.healthText.setText(`HP: ${this.player.getHealth()} / ${this.player.getMaxHealth()}`)
 
       if (!this.player.isAlive()) {
         this.state = 'GAME_OVER'
@@ -91,8 +89,11 @@ export class GameScene extends Phaser.Scene {
           return
         }
 
-        projectile.destroy()
-        enemy.takeDamage(1)
+        if (!projectile.hit(enemy, this.player.getDamage())) return
+        const ricochetTarget = projectile.canRicochet()
+          ? this.findNearestEnemy(projectile, candidate => !projectile.hasHit(candidate))
+          : undefined
+        projectile.finishHit(ricochetTarget)
       },
     )
   }
@@ -109,8 +110,10 @@ export class GameScene extends Phaser.Scene {
 
     this.player.update()
 
-    for (const enemy of this.enemies.getChildren()) {
+    for (const enemy of [...this.enemies.getChildren()]) {
       if (enemy instanceof Enemy && enemy.active) {
+        enemy.updateBurn(this.time.now)
+        if (!enemy.active) continue
         enemy.chase(this.player.x, this.player.y)
       }
     }
@@ -119,14 +122,26 @@ export class GameScene extends Phaser.Scene {
       return
     }
 
-    if (time - this.lastShotTime < this.shotCooldown) {
+    if (time - this.lastShotTime < this.player.getAttackCooldown()) {
       return
     }
 
+    if (!this.fireProjectile()) return
+    this.lastShotTime = time
+    if (this.player.hasUpgrade('rapid-shot')) {
+      const wave = this.currentWave
+      this.time.delayedCall(100, () => {
+        if (this.state === 'COMBAT' && this.currentWave === wave) this.fireProjectile()
+      })
+    }
+  }
+
+  private fireProjectile(): boolean {
+    if (this.state !== 'COMBAT' || !this.player.isAlive()) return false
     const target = this.findNearestEnemy()
 
     if (!target) {
-      return
+      return false
     }
 
     const projectile = new Projectile(
@@ -135,10 +150,15 @@ export class GameScene extends Phaser.Scene {
       this.player.y,
       target.x,
       target.y,
+      {
+        piercing: this.player.hasUpgrade('piercing-shot'),
+        ricochet: this.player.hasUpgrade('ricochet'),
+        flame: this.player.hasUpgrade('flame-shot'),
+      },
     )
 
     this.projectiles.add(projectile)
-    this.lastShotTime = time
+    return true
   }
 
   private showStartScreen() {
@@ -186,6 +206,9 @@ export class GameScene extends Phaser.Scene {
   private stopCombat() {
     this.player.setVelocity(0, 0)
     this.projectiles.clear(true, true)
+    for (const enemy of this.enemies.getChildren()) {
+      if (enemy instanceof Enemy) enemy.clearBurn()
+    }
   }
 
   private completeWave() {
@@ -205,7 +228,7 @@ export class GameScene extends Phaser.Scene {
     this.state = 'UPGRADE_SELECTION'
     const options = generateUpgradeOptions(
       this.currentWave,
-      this.selectedUpgradeIds,
+      this.player.getSelectedUpgradeIds(),
       this.player.getHealth(),
       this.player.getMaxHealth(),
     )
@@ -219,7 +242,8 @@ export class GameScene extends Phaser.Scene {
         .on('pointerdown', () => {
           if (this.state !== 'UPGRADE_SELECTION') return
           this.state = 'COUNTDOWN'
-          this.selectedUpgradeIds.push(upgrade.id)
+          this.player.applyUpgrade(upgrade.id)
+          this.healthText.setText(`HP: ${this.player.getHealth()} / ${this.player.getMaxHealth()}`)
           cards.forEach(card => card.destroy())
           this.startCountdown()
         }),
@@ -292,16 +316,19 @@ export class GameScene extends Phaser.Scene {
 
   }
 
-  private findNearestEnemy(): Enemy | undefined {
+  private findNearestEnemy(
+    origin: { x: number; y: number } = this.player,
+    accepts: (enemy: Enemy) => boolean = () => true,
+  ): Enemy | undefined {
     let nearest: Enemy | undefined
     let nearestDistanceSquared = Infinity
 
     for (const enemy of this.enemies.getChildren()) {
-      if (!(enemy instanceof Enemy) || !enemy.active) {
+      if (!(enemy instanceof Enemy) || !enemy.active || !accepts(enemy)) {
         continue
       }
 
-      const distanceSquared = Phaser.Math.Distance.BetweenPointsSquared(this.player, enemy)
+      const distanceSquared = Phaser.Math.Distance.BetweenPointsSquared(origin, enemy)
 
       if (distanceSquared < nearestDistanceSquared) {
         nearest = enemy

@@ -1,0 +1,93 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import fs from 'node:fs'
+import vm from 'node:vm'
+import ts from 'typescript'
+
+// Exercise the real entity methods without requiring a browser/WebGL context.
+class Sprite {
+  constructor(scene) { this.scene = scene; this.active = true }
+  setDisplaySize() {}
+  setCollideWorldBounds() {}
+  setImmovable() {}
+  setVelocity() {}
+  destroy() { this.active = false }
+}
+const phaser = { Physics: { Arcade: { Sprite } }, Input: { Keyboard: { KeyCodes: {} } } }
+function loadEntity(name) {
+  const source = fs.readFileSync(new URL(`../src/game/entities/${name}.ts`, import.meta.url), 'utf8')
+  const context = { exports: {}, require: () => phaser }
+  vm.runInNewContext(ts.transpileModule(source, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText, context)
+  return context.exports[name]
+}
+const Player = loadEntity('Player')
+const Enemy = loadEntity('Enemy')
+function makePlayer() {
+  const scene = {
+    time: { now: 0 }, add: { existing() {} }, physics: { add: { existing() {} } },
+    input: { keyboard: { createCursorKeys: () => ({}), addKeys: () => ({}) } },
+  }
+  return new Player(scene, 400, 300)
+}
+const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-9)
+
+test('base stats and additive percentage levels 1-3', () => {
+  const p = makePlayer()
+  assert.equal(p.getDamage(), 1)
+  assert.equal(p.getAttackCooldown(), 500)
+  assert.equal(p.getMoveSpeed(), 220)
+  for (let level = 1; level <= 3; level++) {
+    p.applyUpgrade('power-core')
+    p.applyUpgrade('overclock')
+    p.applyUpgrade('turbo')
+    near(p.getDamage(), [1.25, 1.5, 1.75][level - 1])
+    near(p.getAttackCooldown(), 500 / (1 + 0.15 * level))
+    near(p.getMoveSpeed(), [246.4, 272.8, 299.2][level - 1])
+  }
+  assert.equal(p.getSelectedUpgradeIds().length, 9)
+})
+
+test('Chassis at full and partial HP, repeated Repair caps at max HP', () => {
+  const full = makePlayer()
+  full.applyUpgrade('reinforced-chassis')
+  assert.equal(full.getHealth(), 6)
+  assert.equal(full.getMaxHealth(), 6)
+  const p = makePlayer()
+  p.takeDamage(2)
+  p.applyUpgrade('reinforced-chassis')
+  assert.equal(p.getHealth(), 4)
+  assert.equal(p.getMaxHealth(), 6)
+  p.applyUpgrade('repair')
+  assert.equal(p.getHealth(), 6)
+  p.applyUpgrade('repair')
+  assert.equal(p.getHealth(), 6)
+  p.applyUpgrade('reinforced-chassis')
+  assert.equal(p.getHealth(), 7)
+  assert.equal(p.getMaxHealth(), 7)
+})
+
+test('other skills only register their selection', () => {
+  const p = makePlayer()
+  for (const id of ['piercing-shot', 'ricochet', 'flame-shot', 'rapid-shot', 'homing-shot', 'energy-shield', 'revive', 'power-trio', 'triple-shot']) p.applyUpgrade(id)
+  assert.equal(p.getSelectedUpgradeIds().length, 9)
+  assert.equal(p.getDamage(), 1)
+  assert.equal(p.getAttackCooldown(), 500)
+  assert.equal(p.getMoveSpeed(), 220)
+  assert.equal(p.getHealth(), 5)
+  assert.equal(p.getMaxHealth(), 5)
+})
+
+test('enemy retains fractional HP and dies at zero', () => {
+  const p = makePlayer()
+  p.applyUpgrade('power-core')
+  const enemy = new Enemy(p.scene, 0, 0)
+  enemy.takeDamage(p.getDamage())
+  assert.equal(enemy.health, 1.75)
+  enemy.takeDamage(p.getDamage())
+  assert.equal(enemy.health, 0.5)
+  assert.equal(enemy.active, true)
+  enemy.takeDamage(p.getDamage())
+  assert.equal(enemy.active, false)
+})

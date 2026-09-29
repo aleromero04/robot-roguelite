@@ -3,8 +3,14 @@ import Phaser from 'phaser'
 export class Player extends Phaser.Physics.Arcade.Sprite {
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys
   private wasd: Record<string, Phaser.Input.Keyboard.Key>
-  private readonly speed = 220
-  private readonly maxHealth = 5
+  private readonly baseSpeed = 220
+  private readonly baseDamage = 1
+  private readonly baseCooldown = 500
+  private powerCoreLevel = 0
+  private overclockLevel = 0
+  private turboLevel = 0
+  private selectedUpgradeIds: string[] = []
+  private maxHealth = 5
   private health = this.maxHealth
   private readonly invulnerabilityDuration = 1000
   private invulnerableUntil = 0
@@ -45,7 +51,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     const direction = new Phaser.Math.Vector2(x, y)
 
     if (direction.length() > 0) {
-      direction.normalize().scale(this.speed)
+      direction.normalize().scale(this.getMoveSpeed())
     }
 
     this.setVelocity(direction.x, direction.y)
@@ -56,6 +62,50 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
   getMaxHealth(): number {
     return this.maxHealth
+  }
+
+  getDamage(): number {
+    return this.baseDamage * (1 + 0.25 * this.powerCoreLevel)
+  }
+
+  getAttackCooldown(): number {
+    return this.baseCooldown / (1 + 0.15 * this.overclockLevel)
+  }
+
+  getMoveSpeed(): number {
+    return this.baseSpeed * (1 + 0.12 * this.turboLevel)
+  }
+
+  getSelectedUpgradeIds(): readonly string[] {
+    return this.selectedUpgradeIds
+  }
+
+  hasUpgrade(id: string): boolean {
+    return this.selectedUpgradeIds.includes(id)
+  }
+
+  applyUpgrade(id: string) {
+    this.selectedUpgradeIds.push(id)
+
+    switch (id) {
+      case 'power-core':
+        this.powerCoreLevel++
+        break
+      case 'overclock':
+        this.overclockLevel++
+        break
+      case 'turbo':
+        this.turboLevel++
+        break
+      case 'reinforced-chassis':
+        this.maxHealth++
+        this.health = Math.min(this.maxHealth, this.health + 1)
+        break
+      case 'repair':
+        this.health = Math.min(this.maxHealth, this.health + 2)
+        break
+      // Projectile abilities read the build through hasUpgrade().
+    }
   }
 
   isAlive(): boolean {

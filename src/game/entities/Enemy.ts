@@ -3,6 +3,8 @@ import Phaser from 'phaser'
 export class Enemy extends Phaser.Physics.Arcade.Sprite {
   private health = 3
   private readonly speed = 90
+  private burnTicksRemaining = 0
+  private nextBurnTick = 0
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y, 'enemy')
@@ -22,10 +24,30 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     this.setVelocity(direction.x, direction.y)
   }
 
+  applyBurn() {
+    if (!this.active) return
+    this.burnTicksRemaining = 4
+    this.nextBurnTick = this.scene.time.now + 500
+  }
+
+  clearBurn() {
+    this.burnTicksRemaining = 0
+  }
+
+  updateBurn(time: number) {
+    while (this.active && this.burnTicksRemaining > 0 && time >= this.nextBurnTick) {
+      this.burnTicksRemaining--
+      this.nextBurnTick += 500
+      this.takeDamage(0.25)
+    }
+  }
+
   takeDamage(amount: number) {
+    if (!this.active) return
     this.health -= amount
 
     if (this.health <= 0) {
+      this.clearBurn()
       this.destroy()
     }
   }

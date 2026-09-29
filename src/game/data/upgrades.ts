@@ -10,7 +10,7 @@ export interface Upgrade {
 }
 
 export const UPGRADES: readonly Upgrade[] = [
-  { id: 'power-core', name: 'Power Core', description: '+20% daño.', rarity: 'COMMON', repeatable: true },
+  { id: 'power-core', name: 'Power Core', description: '+25% daño por nivel.', rarity: 'COMMON', repeatable: true },
   { id: 'overclock', name: 'Overclock', description: '+15% velocidad de ataque.', rarity: 'COMMON', repeatable: true },
   { id: 'turbo', name: 'Turbo', description: '+12% velocidad de movimiento.', rarity: 'COMMON', repeatable: true },
   { id: 'reinforced-chassis', name: 'Reinforced Chassis', description: '+1 HP máximo y cura 1 HP.', rarity: 'COMMON', repeatable: true },
