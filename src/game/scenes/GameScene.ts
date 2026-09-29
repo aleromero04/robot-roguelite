@@ -3,6 +3,8 @@ import { Player } from '../entities/Player'
 import { Enemy } from '../entities/Enemy'
 import { Projectile } from '../entities/Projectile'
 
+type GameState = 'START' | 'COMBAT' | 'UPGRADE_SELECTION' | 'COUNTDOWN' | 'WAVE_COMPLETE' | 'GAME_OVER'
+
 export class GameScene extends Phaser.Scene {
   private player!: Player
   private enemies!: Phaser.GameObjects.Group
@@ -11,7 +13,8 @@ export class GameScene extends Phaser.Scene {
   private projectiles!: Phaser.GameObjects.Group
   private healthText!: Phaser.GameObjects.Text
   private waveText!: Phaser.GameObjects.Text
-  private waveComplete = false
+  private state: GameState = 'START'
+  private currentWave: 1 | 2 = 1
 
   constructor() {
     super('GameScene')
@@ -41,21 +44,28 @@ export class GameScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, 800, 600)
     this.player = new Player(this, 400, 300)
     this.enemies = this.add.group()
-    this.spawnWave()
     this.projectiles = this.add.group()
     this.healthText = this.add.text(16, 16, `HP: ${this.player.getHealth()}`, {
       fontSize: '24px',
       color: '#ffffff',
     }).setDepth(1)
 
+    this.waveText = this.add.text(400, 70, '', {
+      fontSize: '32px',
+      color: '#ffffff',
+    }).setOrigin(0.5).setDepth(1).setVisible(false)
+    this.showStartScreen()
+
     this.physics.add.overlap(this.player, this.enemies, (_player, enemy) => {
-      if (!(enemy instanceof Enemy) || !enemy.active || !this.player.takeDamage(1)) {
+      if (this.state !== 'COMBAT' || !(enemy instanceof Enemy) || !enemy.active || !this.player.takeDamage(1)) {
         return
       }
 
       this.healthText.setText(`HP: ${this.player.getHealth()}`)
 
       if (!this.player.isAlive()) {
+        this.state = 'GAME_OVER'
+        this.stopCombat()
         this.waveText.setVisible(false)
         for (const remainingEnemy of this.enemies.getChildren()) {
           if (remainingEnemy instanceof Enemy && remainingEnemy.active) {
@@ -74,7 +84,7 @@ export class GameScene extends Phaser.Scene {
       this.projectiles,
       this.enemies,
       (projectile, enemy) => {
-        if (!(projectile instanceof Projectile) || !projectile.active ||
+        if (this.state !== 'COMBAT' || !(projectile instanceof Projectile) || !projectile.active ||
             !(enemy instanceof Enemy) || !enemy.active) {
           return
         }
@@ -86,12 +96,16 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number) {
-    if (!this.player.isAlive()) {
+    if (this.state !== 'COMBAT' || !this.player.isAlive()) {
+      return
+    }
+
+    if (this.enemies.countActive(true) === 0) {
+      this.completeWave()
       return
     }
 
     this.player.update()
-    this.checkWaveComplete()
 
     for (const enemy of this.enemies.getChildren()) {
       if (enemy instanceof Enemy && enemy.active) {
@@ -125,9 +139,95 @@ export class GameScene extends Phaser.Scene {
     this.lastShotTime = time
   }
 
-  private spawnWave() {
+  private showStartScreen() {
+    this.player.setVisible(false)
+    this.healthText.setVisible(false)
+    const title = this.add.text(400, 180, 'ROBOT ROGUELITE', {
+      fontSize: '40px', color: '#ffffff',
+    }).setOrigin(0.5)
+    const instructions = this.add.text(400, 280,
+      'WASD / Flechas para moverte\nDetente para disparar', {
+        fontSize: '24px', color: '#ffffff', align: 'center',
+      }).setOrigin(0.5)
+    const play = this.createButton(400, 390, 'JUGAR', () => {
+      if (this.state !== 'START') return
+      title.destroy()
+      instructions.destroy()
+      play.destroy()
+      this.player.setVisible(true)
+      this.healthText.setVisible(true)
+      this.startWave(1)
+    })
+  }
+
+  private createButton(x: number, y: number, label: string, onClick: () => void) {
+    return this.add.text(x, y, label, {
+      fontSize: '24px', color: '#ffffff', backgroundColor: '#334155',
+      padding: { x: 20, y: 12 },
+    }).setOrigin(0.5).setDepth(2).setInteractive({ useHandCursor: true })
+      .on('pointerdown', onClick)
+  }
+
+  private startWave(wave: 1 | 2) {
+    this.currentWave = wave
+    this.spawnWave(wave === 1 ? 5 : 7)
+    this.lastShotTime = this.time.now
+    this.state = 'COMBAT'
+    this.waveText.setText(`WAVE ${wave}`).setVisible(true)
+    this.time.delayedCall(1500, () => {
+      if (this.state === 'COMBAT' && this.currentWave === wave) {
+        this.waveText.setVisible(false)
+      }
+    })
+  }
+
+  private stopCombat() {
+    this.player.setVelocity(0, 0)
+    this.projectiles.clear(true, true)
+  }
+
+  private completeWave() {
+    this.state = 'WAVE_COMPLETE'
+    this.stopCombat()
+    this.waveText.setText('WAVE COMPLETE').setVisible(true)
+    if (this.currentWave === 1) {
+      this.time.delayedCall(1000, () => {
+        if (this.state === 'WAVE_COMPLETE' && this.player.isAlive()) {
+          this.showUpgradeSelection()
+        }
+      })
+    }
+  }
+
+  private showUpgradeSelection() {
+    this.state = 'UPGRADE_SELECTION'
+    const buttons = ['MEJORA A', 'MEJORA B', 'MEJORA C'].map((label, index) =>
+      this.createButton(180 + index * 220, 300, label, () => {
+        if (this.state !== 'UPGRADE_SELECTION') return
+        this.state = 'COUNTDOWN'
+        buttons.forEach(button => button.destroy())
+        this.startCountdown()
+      }),
+    )
+  }
+
+  private startCountdown() {
+    const steps = ['3', '2', '1', 'GO']
+    const showStep = (index: number) => {
+      if (this.state !== 'COUNTDOWN' || !this.player.isAlive()) return
+      if (index === steps.length) {
+        this.startWave(2)
+        return
+      }
+      this.waveText.setText(steps[index]).setVisible(true)
+      this.time.delayedCall(1000, () => showStep(index + 1))
+    }
+    showStep(0)
+  }
+
+  private spawnWave(count: number) {
     const bounds = this.physics.world.bounds
-    // Enemy is 40 x 40. These edges are at least 280 px from the starting player.
+    // Keep the complete 40 x 40 enemy inside the world.
     const margin = 20
     const left = bounds.left + margin
     const right = bounds.right - margin
@@ -135,12 +235,14 @@ export class GameScene extends Phaser.Scene {
     const bottom = bounds.bottom - margin
     const minDistance = 60
     const maxAttempts = 100
-    const isSeparated = (x: number, y: number) => this.enemies.getChildren().every(
+    const isSeparated = (x: number, y: number) =>
+      Phaser.Math.Distance.BetweenPointsSquared({ x, y }, this.player) >= 280 ** 2 &&
+      this.enemies.getChildren().every(
       enemy => !(enemy instanceof Enemy) ||
         Phaser.Math.Distance.BetweenPointsSquared({ x, y }, enemy) >= minDistance ** 2,
     )
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < count; i++) {
       let position: { x: number; y: number } | undefined
 
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -154,15 +256,16 @@ export class GameScene extends Phaser.Scene {
         }
       }
 
-      // Bounded fallback: keep all five enemies even if random attempts fail.
-      // With at most four existing enemies, this edge has enough free slots.
+      // Search all four edges if random attempts are exhausted.
       if (!position) {
+        const candidates: { x: number; y: number }[] = []
         for (let x = left; x <= right; x += minDistance) {
-          if (isSeparated(x, top)) {
-            position = { x, y: top }
-            break
-          }
+          candidates.push({ x, y: top }, { x, y: bottom })
         }
+        for (let y = top; y <= bottom; y += minDistance) {
+          candidates.push({ x: left, y }, { x: right, y })
+        }
+        position = candidates.find(({ x, y }) => isSeparated(x, y))
       }
 
       if (!position) {
@@ -172,25 +275,6 @@ export class GameScene extends Phaser.Scene {
       this.enemies.add(new Enemy(this, position.x, position.y))
     }
 
-    this.waveText = this.add.text(400, 70, 'WAVE 1', {
-      fontSize: '32px',
-      color: '#ffffff',
-    }).setOrigin(0.5).setDepth(1)
-
-    this.time.delayedCall(1500, () => {
-      if (!this.waveComplete) {
-        this.waveText.setVisible(false)
-      }
-    })
-  }
-
-  private checkWaveComplete() {
-    if (this.waveComplete || !this.player.isAlive() || this.enemies.countActive(true) > 0) {
-      return
-    }
-
-    this.waveComplete = true
-    this.waveText.setText('WAVE COMPLETE').setVisible(true)
   }
 
   private findNearestEnemy(): Enemy | undefined {
