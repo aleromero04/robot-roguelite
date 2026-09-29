@@ -4,7 +4,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys
   private wasd: Record<string, Phaser.Input.Keyboard.Key>
   private readonly speed = 220
-  private health = 5
+  private readonly maxHealth = 5
+  private health = this.maxHealth
   private readonly invulnerabilityDuration = 1000
   private invulnerableUntil = 0
 
@@ -51,6 +52,10 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   }
   getHealth(): number {
     return this.health
+  }
+
+  getMaxHealth(): number {
+    return this.maxHealth
   }
 
   isAlive(): boolean {

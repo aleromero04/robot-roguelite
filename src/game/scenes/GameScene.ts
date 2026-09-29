@@ -2,6 +2,7 @@ import Phaser from 'phaser'
 import { Player } from '../entities/Player'
 import { Enemy } from '../entities/Enemy'
 import { Projectile } from '../entities/Projectile'
+import { generateUpgradeOptions } from '../data/upgrades'
 
 type GameState = 'START' | 'COMBAT' | 'UPGRADE_SELECTION' | 'COUNTDOWN' | 'WAVE_COMPLETE' | 'GAME_OVER'
 
@@ -15,6 +16,7 @@ export class GameScene extends Phaser.Scene {
   private waveText!: Phaser.GameObjects.Text
   private state: GameState = 'START'
   private currentWave: 1 | 2 = 1
+  private selectedUpgradeIds: string[] = []
 
   constructor() {
     super('GameScene')
@@ -201,13 +203,26 @@ export class GameScene extends Phaser.Scene {
 
   private showUpgradeSelection() {
     this.state = 'UPGRADE_SELECTION'
-    const buttons = ['MEJORA A', 'MEJORA B', 'MEJORA C'].map((label, index) =>
-      this.createButton(180 + index * 220, 300, label, () => {
-        if (this.state !== 'UPGRADE_SELECTION') return
-        this.state = 'COUNTDOWN'
-        buttons.forEach(button => button.destroy())
-        this.startCountdown()
-      }),
+    const options = generateUpgradeOptions(
+      this.currentWave,
+      this.selectedUpgradeIds,
+      this.player.getHealth(),
+      this.player.getMaxHealth(),
+    )
+    const cards = options.map((upgrade, index) =>
+      this.add.text(160 + index * 240, 300,
+        `${upgrade.name}\n\n${upgrade.rarity}\n\n${upgrade.description}`, {
+          fontSize: '18px', color: '#ffffff', backgroundColor: '#334155',
+          fixedWidth: 220, fixedHeight: 240,
+          padding: { x: 12, y: 16 }, wordWrap: { width: 196 }, align: 'center',
+        }).setOrigin(0.5).setDepth(2).setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => {
+          if (this.state !== 'UPGRADE_SELECTION') return
+          this.state = 'COUNTDOWN'
+          this.selectedUpgradeIds.push(upgrade.id)
+          cards.forEach(card => card.destroy())
+          this.startCountdown()
+        }),
     )
   }
 
