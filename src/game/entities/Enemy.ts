@@ -3,6 +3,11 @@ import Phaser from 'phaser'
 export class Enemy extends Phaser.Physics.Arcade.Sprite {
   private health = 3
   private readonly speed = 90
+  private readonly lateralStrength = 0.25
+  private lateralBias = 0
+  private targetLateralBias = 0
+  private nextLateralChange = 0
+  private lastChaseTime = 0
   private burnTicksRemaining = 0
   private nextBurnTick = 0
 
@@ -17,9 +22,34 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   }
 
   chase(targetX: number, targetY: number) {
+    const now = this.scene.time.now
+    const elapsed = Math.max(0, now - this.lastChaseTime)
+    this.lastChaseTime = now
+
+    if (now >= this.nextLateralChange) {
+      this.targetLateralBias = Phaser.Math.Between(0, 1) === 0
+        ? -this.lateralStrength
+        : this.lateralStrength
+      this.nextLateralChange = now + Phaser.Math.Between(700, 1300)
+    }
+
+    // Smooth changes of side independently of the frame rate (150 ms response).
+    this.lateralBias += (this.targetLateralBias - this.lateralBias) *
+      (1 - Math.exp(-elapsed / 150))
+
     const direction = new Phaser.Math.Vector2(targetX - this.x, targetY - this.y)
-      .normalize()
-      .scale(this.speed)
+    if (direction.lengthSq() < 1) {
+      this.setVelocity(0, 0)
+      return
+    }
+
+    direction.normalize()
+    const directX = direction.x
+    const directY = direction.y
+    direction.set(
+      directX - directY * this.lateralBias,
+      directY + directX * this.lateralBias,
+    ).normalize().scale(this.speed)
 
     this.setVelocity(direction.x, direction.y)
   }
