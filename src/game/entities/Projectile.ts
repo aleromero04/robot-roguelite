@@ -25,4 +25,22 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
       direction.y * this.speed,
     )
   }
+
+  preUpdate(time: number, delta: number) {
+    super.preUpdate(time, delta)
+
+    const bounds = this.scene.physics.world.bounds
+    const halfWidth = this.displayWidth / 2
+    const halfHeight = this.displayHeight / 2
+
+    // Remove missed shots once they have completely left the arena.
+    if (
+      this.x + halfWidth < bounds.left ||
+      this.x - halfWidth > bounds.right ||
+      this.y + halfHeight < bounds.top ||
+      this.y - halfHeight > bounds.bottom
+    ) {
+      this.destroy()
+    }
+  }
 }
