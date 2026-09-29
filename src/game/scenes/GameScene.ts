@@ -1,6 +1,7 @@
 import Phaser from 'phaser'
 import { Player } from '../entities/Player'
 import { Enemy } from '../entities/Enemy'
+import type { EnemyType } from '../entities/Enemy'
 import { Projectile } from '../entities/Projectile'
 import { generateUpgradeOptions } from '../data/upgrades'
 
@@ -36,6 +37,12 @@ export class GameScene extends Phaser.Scene {
     enemyGraphics.generateTexture('enemy', 40, 40)
     enemyGraphics.destroy()
 
+    const runnerGraphics = this.make.graphics({ x: 0, y: 0 }, false)
+    runnerGraphics.fillStyle(0x22d3ee)
+    runnerGraphics.fillRect(0, 0, 40, 40)
+    runnerGraphics.generateTexture('runner', 40, 40)
+    runnerGraphics.destroy()
+
     const projectileGraphics = this.make.graphics({ x: 0, y: 0 }, false)
     projectileGraphics.fillStyle(0xfacc15)
     projectileGraphics.fillCircle(5, 5, 5)
@@ -62,7 +69,7 @@ export class GameScene extends Phaser.Scene {
     this.showStartScreen()
 
     this.physics.add.overlap(this.player, this.enemies, (_player, enemy) => {
-      if (this.state !== 'COMBAT' || !(enemy instanceof Enemy) || !enemy.active || !this.player.takeDamage(1)) {
+      if (this.state !== 'COMBAT' || !(enemy instanceof Enemy) || !enemy.active || !this.player.takeDamage(enemy.contactDamage)) {
         return
       }
 
@@ -217,7 +224,10 @@ export class GameScene extends Phaser.Scene {
     this.player.startWave()
     this.updatePlayerUI()
     this.currentWave = wave
-    this.spawnWave(wave === 1 ? 5 : 7)
+    // Temporary Wave 2 composition for testing Runner.
+    const composition: EnemyType[] = ['basic', 'basic', 'basic', 'basic', 'basic']
+    if (wave === 2) composition.push('runner', 'runner')
+    this.spawnWave(composition)
     this.lastShotTime = this.time.now
     this.state = 'COMBAT'
     this.waveText.setText(`WAVE ${wave}`).setVisible(true)
@@ -289,7 +299,7 @@ export class GameScene extends Phaser.Scene {
     showStep(0)
   }
 
-  private spawnWave(count: number) {
+  private spawnWave(composition: readonly EnemyType[]) {
     const bounds = this.physics.world.bounds
     // Keep the complete 40 x 40 enemy inside the world.
     const margin = 20
@@ -306,7 +316,7 @@ export class GameScene extends Phaser.Scene {
         Phaser.Math.Distance.BetweenPointsSquared({ x, y }, enemy) >= minDistance ** 2,
     )
 
-    for (let i = 0; i < count; i++) {
+    for (const type of composition) {
       let position: { x: number; y: number } | undefined
 
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -336,7 +346,7 @@ export class GameScene extends Phaser.Scene {
         throw new Error('No valid enemy spawn position')
       }
 
-      this.enemies.add(new Enemy(this, position.x, position.y))
+      this.enemies.add(new Enemy(this, position.x, position.y, type))
     }
 
   }

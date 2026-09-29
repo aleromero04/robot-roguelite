@@ -1,8 +1,17 @@
 import Phaser from 'phaser'
 
+export type EnemyType = 'basic' | 'runner'
+
+const ENEMY_STATS = {
+  basic: { health: 3, speed: 90, contactDamage: 1, texture: 'enemy' },
+  runner: { health: 1.5, speed: 160, contactDamage: 1, texture: 'runner' },
+} satisfies Record<EnemyType, { health: number; speed: number; contactDamage: number; texture: string }>
+
+
 export class Enemy extends Phaser.Physics.Arcade.Sprite {
-  private health = 3
-  private readonly speed = 90
+  private health: number
+  private readonly speed: number
+  readonly contactDamage: number
   private readonly lateralStrength = 0.25
   private lateralBias = 0
   private targetLateralBias = 0
@@ -11,8 +20,12 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   private burnTicksRemaining = 0
   private nextBurnTick = 0
 
-  constructor(scene: Phaser.Scene, x: number, y: number) {
-    super(scene, x, y, 'enemy')
+  constructor(scene: Phaser.Scene, x: number, y: number, type: EnemyType = 'basic') {
+    const stats = ENEMY_STATS[type]
+    super(scene, x, y, stats.texture)
+    this.health = stats.health
+    this.speed = stats.speed
+    this.contactDamage = stats.contactDamage
 
     scene.add.existing(this)
     scene.physics.add.existing(this)

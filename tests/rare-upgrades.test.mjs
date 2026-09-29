@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import vm from 'node:vm'
 import ts from 'typescript'
 class Sprite {
-  constructor(scene,x,y) { Object.assign(this,{scene,x,y,active:true}) }
+  constructor(scene,x,y,texture) { Object.assign(this,{scene,x,y,texture,active:true}) }
   setDisplaySize() {}
   setImmovable() {}
   setVelocity(x,y) { this.velocity={x,y}; this.body={velocity:this.velocity} }
@@ -12,9 +12,12 @@ class Sprite {
 }
 class Vector2 {
   constructor(x,y) { Object.assign(this,{x,y}) }
+  lengthSq() { return this.x*this.x+this.y*this.y }
+  set(x,y) { this.x=x;this.y=y;return this }
+  scale(n) { this.x*=n;this.y*=n;return this }
   normalize() { const n=Math.hypot(this.x,this.y);if(n){this.x/=n;this.y/=n}return this }
 }
-const phaser={Scene:class {},Physics:{Arcade:{Sprite}},Math:{Vector2,Distance:{BetweenPointsSquared:(a,b)=>(a.x-b.x)**2+(a.y-b.y)**2}}}
+const phaser={Scene:class {},Physics:{Arcade:{Sprite}},Math:{Vector2,Between:(min,max)=>Math.floor(Math.random()*(max-min+1))+min,Distance:{BetweenPointsSquared:(a,b)=>(a.x-b.x)**2+(a.y-b.y)**2}}}
 const modules={}
 function load(path,name) {
   const context={exports:{},require:id=>id==='phaser'?phaser:modules[id]??{}}
@@ -133,4 +136,75 @@ test('Triple cancels pending shots after combat, wave change or no targets',()=>
   if(mode==='wave')f.s.currentWave=2
   f.timers.forEach(t=>t.cb());assert.equal(f.shots.length,1)
  }
+})
+
+test('Basic and Runner share chase but preserve their health, speed and contact damage',()=>{
+ const s=scene();s.time.now=1000
+ for(const [type,hp,speed,texture] of [['basic',3,90,'enemy'],['runner',1.5,160,'runner']]) {
+  const enemy=new Enemy(s,0,0,type)
+  assert.equal(enemy.health,hp);assert.equal(enemy.contactDamage,1);assert.equal(enemy.texture,texture)
+  enemy.chase(100,100)
+  assert.ok(Math.abs(Math.hypot(enemy.velocity.x,enemy.velocity.y)-speed)<1e-9)
+  enemy.chase(0,0);assert.equal(Math.hypot(enemy.velocity.x,enemy.velocity.y),0)
+ }
+})
+test('Runner dies from 1.5 direct damage; Flame stops on death and projectile interactions are shared',()=>{
+ const s=scene(),runner=new Enemy(s,20,0,'runner'),basic=new Enemy(s,50,0)
+ runner.applyBurn()
+ const p=shot(s,{piercing:true,ricochet:true,flame:true})
+ p.enableHoming(runner,()=>basic)
+ p.hit(runner,1.5);assert.equal(runner.active,false);assert.equal(runner.burnTicksRemaining,0)
+ runner.updateBurn(5000);assert.equal(runner.health,0)
+ p.finishHit(basic);p.updateHoming(16)
+ assert.equal(p.homingTarget,basic);assert.equal(p.hit(runner,1),false)
+ p.hit(basic,1);p.finishHit();assert.equal(p.active,false)
+ assert.equal(basic.health,2);assert.equal(basic.burnTicksRemaining,4)
+})
+test('actual wave start creates five Basics then five Basics plus two Runners using safe spawn',()=>{
+ for(const wave of [1,2]) {
+  const s=new GameScene(),items=[]
+  Object.assign(s,{
+   player:{x:400,y:300,startWave(){}},updatePlayerUI(){},
+   add:{existing(){}},physics:{add:{existing(){}},world:{bounds:{left:0,right:800,top:0,bottom:600}}},
+   enemies:{getChildren:()=>items,add:e=>items.push(e)},
+   time:{now:0,delayedCall(){}},waveText:{setText(){return this},setVisible(){return this}},
+  })
+  s.startWave(wave)
+  assert.equal(items.filter(e=>e.texture==='enemy').length,5)
+  assert.equal(items.filter(e=>e.texture==='runner').length,wave===1?0:2)
+  for(const [i,e] of items.entries()) {
+   assert.ok(e.x>=20&&e.x<=780&&e.y>=20&&e.y<=580)
+   assert.ok(Math.hypot(e.x-400,e.y-300)>=280)
+   for(const other of items.slice(0,i))assert.ok(Math.hypot(e.x-other.x,e.y-other.y)>=60)
+  }
+  s.player.isAlive=()=>true
+  s.enemies.countActive=()=>items.filter(e=>e.active).length
+  let completed=false;s.completeWave=()=>{completed=true}
+  items.forEach(e=>e.takeDamage(3));s.update(1)
+  assert.equal(completed,true)
+ }
+})
+
+
+test('Runner damage breakpoints retain fractional HP without rounding',()=>{
+ for(const [damage,remaining] of [[1,0.5],[1.25,0.25],[1.5,0]]) {
+  const s=scene(),runner=new Enemy(s,20,0,'runner')
+  const first=shot(s);first.hit(runner,damage);first.finishHit()
+  assert.equal(runner.health,remaining)
+  assert.equal(runner.active,remaining>0)
+  if(remaining>0) {
+   const second=shot(s);second.hit(runner,damage);second.finishHit()
+   assert.equal(runner.active,false)
+  }
+ }
+})
+test('Flame kills a 1.5 HP Runner after two burn ticks and cancels remaining ticks',()=>{
+ const s=scene(),runner=new Enemy(s,20,0,'runner'),p=shot(s,{flame:true})
+ p.hit(runner,1);p.finishHit()
+ assert.equal(runner.health,0.5);assert.equal(runner.active,true)
+ runner.updateBurn(499);assert.equal(runner.health,0.5)
+ runner.updateBurn(500);assert.equal(runner.health,0.25);assert.equal(runner.active,true)
+ runner.updateBurn(1000);assert.equal(runner.health,0);assert.equal(runner.active,false)
+ assert.equal(runner.burnTicksRemaining,0)
+ runner.updateBurn(5000);assert.equal(runner.health,0)
 })
