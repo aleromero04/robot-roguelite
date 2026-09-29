@@ -60,7 +60,7 @@ function combat() {
  const s=new GameScene(),enemies=[new Enemy(scene(),100,0),new Enemy(scene(),200,0)],shots=[],timers=[]
  Object.assign(s,{state:'COMBAT',currentWave:1,time:{now:500,delayedCall:(delay,cb)=>timers.push({delay,cb})},add:{existing(){}},physics:{add:{existing(){}}},enemies:{getChildren:()=>enemies,countActive:()=>enemies.filter(e=>e.active).length},projectiles:{add:p=>shots.push(p)}})
  let moving=false
- s.player={x:0,y:0,isAlive:()=>true,update(){},isMoving:()=>moving,getAttackCooldown:()=>500/1.15,hasUpgrade:()=>true}
+ s.player={x:0,y:0,isAlive:()=>true,update(){},isMoving:()=>moving,getAttackCooldown:()=>500/1.15,getBurstSize:()=>2,hasUpgrade:()=>true}
  enemies.forEach(e=>{e.chase=()=>{}})
  return {s,enemies,shots,timers,move:()=>{moving=true}}
 }
@@ -107,4 +107,30 @@ test('Homing preserves Ricochet target, excludes pierced enemy and Rapid enables
  const f=combat();f.s.update(500);f.timers[0].cb()
  assert.equal(f.shots.length,2)
  assert.ok(f.shots.every(projectile=>typeof projectile.findHomingTarget==='function'))
+})
+
+test('Triple creates three shots at 0/100/200 ms, retargets each and retains abilities',()=>{
+ const f=combat();f.s.player.getBurstSize=()=>3
+ f.enemies[1].x=0;f.enemies[1].y=200
+ const third=new Enemy(scene(),-200,0);third.chase=()=>{};f.enemies.push(third)
+ f.s.update(500)
+ assert.equal(f.shots.length,1)
+ assert.deepEqual(f.timers.map(t=>t.delay),[100,200])
+ assert.ok(f.shots[0].velocity.x>0)
+ f.enemies[0].destroy();f.move();f.s.time.now=600;f.timers[0].cb()
+ assert.ok(f.shots[1].velocity.y>0)
+ f.enemies[1].destroy();f.s.time.now=700;f.timers[1].cb()
+ assert.ok(f.shots[2].velocity.x<0)
+ assert.equal(f.shots.length,3)
+ assert.ok(f.shots.every(p=>p.abilities.piercing&&p.abilities.ricochet&&p.abilities.flame&&p.findHomingTarget))
+ f.s.update(1500);assert.equal(f.shots.length,3)
+})
+test('Triple cancels pending shots after combat, wave change or no targets',()=>{
+ for(const mode of ['empty','game-over','wave']) {
+  const f=combat();f.s.player.getBurstSize=()=>3;f.s.update(500)
+  if(mode==='empty')f.enemies.forEach(e=>e.destroy())
+  if(mode==='game-over')f.s.state='GAME_OVER'
+  if(mode==='wave')f.s.currentWave=2
+  f.timers.forEach(t=>t.cb());assert.equal(f.shots.length,1)
+ }
 })

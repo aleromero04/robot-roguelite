@@ -68,10 +68,10 @@ test('Chassis at full and partial HP, repeated Repair caps at max HP', () => {
   assert.equal(p.getMaxHealth(), 7)
 })
 
-test('other skills only register their selection', () => {
+test('non-stat skills do not change base numeric stats', () => {
   const p = makePlayer()
-  for (const id of ['piercing-shot', 'ricochet', 'flame-shot', 'rapid-shot', 'homing-shot', 'energy-shield', 'revive', 'power-trio', 'triple-shot']) p.applyUpgrade(id)
-  assert.equal(p.getSelectedUpgradeIds().length, 9)
+  for (const id of ['piercing-shot', 'ricochet', 'flame-shot', 'rapid-shot', 'homing-shot', 'energy-shield', 'revive', 'triple-shot']) p.applyUpgrade(id)
+  assert.equal(p.getSelectedUpgradeIds().length, 8)
   assert.equal(p.getDamage(), 1)
   assert.equal(p.getAttackCooldown(), 500)
   assert.equal(p.getMoveSpeed(), 220)
@@ -137,4 +137,44 @@ test('revive only on lethal damage, once per run, with 1000 ms protection', () =
   low.applyUpgrade('revive')
   low.takeDamage(100)
   assert.equal(low.getHealth(), 2)
+})
+
+test('Power Trio is additive, heals one, and cannot stack twice', () => {
+  for (const first of [false, true]) {
+    const p = makePlayer()
+    p.takeDamage(2)
+    if (first) p.applyUpgrade('power-trio')
+    for (let i = 0; i < 2; i++) {
+      p.applyUpgrade('power-core')
+      p.applyUpgrade('overclock')
+    }
+    if (!first) p.applyUpgrade('power-trio')
+    near(p.getDamage(), 1.7)
+    near(p.getAttackCooldown(), 500 / 1.5)
+    assert.equal(p.getMaxHealth(), 6)
+    assert.equal(p.getHealth(), 4)
+    p.applyUpgrade('power-trio')
+    assert.equal(p.getMaxHealth(), 6)
+    assert.equal(p.getHealth(), 4)
+    assert.equal(p.getSelectedUpgradeIds().filter(id => id === 'power-trio').length, 1)
+  }
+  const full = makePlayer()
+  full.applyUpgrade('power-trio')
+  assert.equal(full.getHealth(), 6)
+  assert.equal(full.getMaxHealth(), 6)
+})
+
+test('Triple overrides Rapid regardless of acquisition order', () => {
+  const p = makePlayer()
+  assert.equal(p.getBurstSize(), 1)
+  p.applyUpgrade('rapid-shot')
+  assert.equal(p.getBurstSize(), 2)
+  p.applyUpgrade('triple-shot')
+  assert.equal(p.getBurstSize(), 3)
+  const reverse = makePlayer()
+  reverse.applyUpgrade('triple-shot')
+  reverse.applyUpgrade('rapid-shot')
+  reverse.applyUpgrade('triple-shot')
+  assert.equal(reverse.getBurstSize(), 3)
+  assert.equal(reverse.getSelectedUpgradeIds().filter(id => id === 'triple-shot').length, 1)
 })

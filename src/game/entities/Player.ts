@@ -67,11 +67,16 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   }
 
   getDamage(): number {
-    return this.baseDamage * (1 + 0.25 * this.powerCoreLevel)
+    return this.baseDamage * (1 + 0.25 * this.powerCoreLevel + (this.hasUpgrade('power-trio') ? 0.20 : 0))
   }
 
   getAttackCooldown(): number {
-    return this.baseCooldown / (1 + 0.15 * this.overclockLevel)
+    return this.baseCooldown / (1 + 0.15 * this.overclockLevel + (this.hasUpgrade('power-trio') ? 0.20 : 0))
+  }
+
+  getBurstSize(): number {
+    if (this.hasUpgrade('triple-shot')) return 3
+    return this.hasUpgrade('rapid-shot') ? 2 : 1
   }
 
   getMoveSpeed(): number {
@@ -87,6 +92,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   }
 
   applyUpgrade(id: string) {
+    if ((id === 'power-trio' || id === 'triple-shot') && this.hasUpgrade(id)) return
     if (id === 'revive' && !this.hasUpgrade(id)) this.reviveReady = true
     this.selectedUpgradeIds.push(id)
 
@@ -100,6 +106,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       case 'turbo':
         this.turboLevel++
         break
+      case 'power-trio':
       case 'reinforced-chassis':
         this.maxHealth++
         this.health = Math.min(this.maxHealth, this.health + 1)

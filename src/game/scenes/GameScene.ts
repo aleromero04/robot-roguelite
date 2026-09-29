@@ -133,9 +133,10 @@ export class GameScene extends Phaser.Scene {
 
     if (!this.fireProjectile()) return
     this.lastShotTime = time
-    if (this.player.hasUpgrade('rapid-shot')) {
-      const wave = this.currentWave
-      this.time.delayedCall(100, () => {
+    const wave = this.currentWave
+    const burstSize = this.player.getBurstSize()
+    for (let index = 1; index < burstSize; index++) {
+      this.time.delayedCall(index * 100, () => {
         if (this.state === 'COMBAT' && this.currentWave === wave) this.fireProjectile()
       })
     }

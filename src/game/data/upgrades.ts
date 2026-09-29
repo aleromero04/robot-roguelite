@@ -22,8 +22,8 @@ export const UPGRADES: readonly Upgrade[] = [
   { id: 'homing-shot', name: 'Homing Shot', description: 'Los proyectiles corrigen su trayectoria hacia enemigos.', rarity: 'EPIC', repeatable: false },
   { id: 'energy-shield', name: 'Energy Shield', description: 'Bloquea el primer golpe de cada wave.', rarity: 'EPIC', repeatable: false },
   { id: 'revive', name: 'Revive', description: 'Permite revivir una vez por partida.', rarity: 'EPIC', repeatable: false },
-  { id: 'power-trio', name: 'Power Trio', description: 'Mejora daño, cadencia y HP máximo.', rarity: 'LEGENDARY', repeatable: false },
-  { id: 'triple-shot', name: 'Triple Shot', description: 'Dispara 3 proyectiles simultáneamente.', rarity: 'LEGENDARY', repeatable: false },
+  { id: 'power-trio', name: 'Power Trio', description: '+20% daño y velocidad de ataque. +1 HP máximo y cura 1 HP.', rarity: 'LEGENDARY', repeatable: false },
+  { id: 'triple-shot', name: 'Triple Shot', description: 'Dispara una ráfaga de 3 proyectiles separados por 100 ms.', rarity: 'LEGENDARY', repeatable: false },
 ]
 
 export const RARITY_WEIGHTS: Record<UpgradeWave, Readonly<Record<Rarity, number>>> = {
