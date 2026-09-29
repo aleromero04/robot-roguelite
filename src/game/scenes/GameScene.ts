@@ -61,6 +61,12 @@ export class GameScene extends Phaser.Scene {
   update(time: number) {
     this.player.update()
 
+    for (const enemy of this.enemies.getChildren()) {
+      if (enemy instanceof Enemy && enemy.active) {
+        enemy.chase(this.player.x, this.player.y)
+      }
+    }
+
     if (this.player.isMoving()) {
       return
     }
