@@ -10,6 +10,8 @@ export class GameScene extends Phaser.Scene {
   private readonly shotCooldown = 500
   private projectiles!: Phaser.GameObjects.Group
   private healthText!: Phaser.GameObjects.Text
+  private waveText!: Phaser.GameObjects.Text
+  private waveComplete = false
 
   constructor() {
     super('GameScene')
@@ -38,11 +40,8 @@ export class GameScene extends Phaser.Scene {
 
     this.physics.world.setBounds(0, 0, 800, 600)
     this.player = new Player(this, 400, 300)
-    this.enemies = this.add.group([
-      new Enemy(this, 650, 300),
-      new Enemy(this, 200, 150),
-      new Enemy(this, 150, 450),
-    ])
+    this.enemies = this.add.group()
+    this.spawnWave()
     this.projectiles = this.add.group()
     this.healthText = this.add.text(16, 16, `HP: ${this.player.getHealth()}`, {
       fontSize: '24px',
@@ -57,6 +56,7 @@ export class GameScene extends Phaser.Scene {
       this.healthText.setText(`HP: ${this.player.getHealth()}`)
 
       if (!this.player.isAlive()) {
+        this.waveText.setVisible(false)
         for (const remainingEnemy of this.enemies.getChildren()) {
           if (remainingEnemy instanceof Enemy && remainingEnemy.active) {
             remainingEnemy.setVelocity(0, 0)
@@ -91,6 +91,7 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.player.update()
+    this.checkWaveComplete()
 
     for (const enemy of this.enemies.getChildren()) {
       if (enemy instanceof Enemy && enemy.active) {
@@ -122,6 +123,74 @@ export class GameScene extends Phaser.Scene {
 
     this.projectiles.add(projectile)
     this.lastShotTime = time
+  }
+
+  private spawnWave() {
+    const bounds = this.physics.world.bounds
+    // Enemy is 40 x 40. These edges are at least 280 px from the starting player.
+    const margin = 20
+    const left = bounds.left + margin
+    const right = bounds.right - margin
+    const top = bounds.top + margin
+    const bottom = bounds.bottom - margin
+    const minDistance = 60
+    const maxAttempts = 100
+    const isSeparated = (x: number, y: number) => this.enemies.getChildren().every(
+      enemy => !(enemy instanceof Enemy) ||
+        Phaser.Math.Distance.BetweenPointsSquared({ x, y }, enemy) >= minDistance ** 2,
+    )
+
+    for (let i = 0; i < 5; i++) {
+      let position: { x: number; y: number } | undefined
+
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const edge = Phaser.Math.Between(0, 3)
+        const x = edge === 2 ? left : edge === 3 ? right : Phaser.Math.Between(left, right)
+        const y = edge === 0 ? top : edge === 1 ? bottom : Phaser.Math.Between(top, bottom)
+
+        if (isSeparated(x, y)) {
+          position = { x, y }
+          break
+        }
+      }
+
+      // Bounded fallback: keep all five enemies even if random attempts fail.
+      // With at most four existing enemies, this edge has enough free slots.
+      if (!position) {
+        for (let x = left; x <= right; x += minDistance) {
+          if (isSeparated(x, top)) {
+            position = { x, y: top }
+            break
+          }
+        }
+      }
+
+      if (!position) {
+        throw new Error('No valid enemy spawn position')
+      }
+
+      this.enemies.add(new Enemy(this, position.x, position.y))
+    }
+
+    this.waveText = this.add.text(400, 70, 'WAVE 1', {
+      fontSize: '32px',
+      color: '#ffffff',
+    }).setOrigin(0.5).setDepth(1)
+
+    this.time.delayedCall(1500, () => {
+      if (!this.waveComplete) {
+        this.waveText.setVisible(false)
+      }
+    })
+  }
+
+  private checkWaveComplete() {
+    if (this.waveComplete || !this.player.isAlive() || this.enemies.countActive(true) > 0) {
+      return
+    }
+
+    this.waveComplete = true
+    this.waveText.setText('WAVE COMPLETE').setVisible(true)
   }
 
   private findNearestEnemy(): Enemy | undefined {
