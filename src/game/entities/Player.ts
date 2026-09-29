@@ -41,4 +41,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     this.setVelocity(direction.x, direction.y)
   }
+    isMoving(): boolean {
+        return this.body!.velocity.lengthSq() > 0
+    }
 }
