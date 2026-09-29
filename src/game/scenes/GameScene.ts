@@ -3,10 +3,9 @@ import { Player } from '../entities/Player'
 import { Enemy } from '../entities/Enemy'
 import { Projectile } from '../entities/Projectile'
 
-
 export class GameScene extends Phaser.Scene {
   private player!: Player
-  private enemy!: Enemy
+  private enemies!: Phaser.GameObjects.Group
   private lastShotTime = 0
   private readonly shotCooldown = 500
   private projectiles!: Phaser.GameObjects.Group
@@ -38,43 +37,73 @@ export class GameScene extends Phaser.Scene {
 
     this.physics.world.setBounds(0, 0, 800, 600)
     this.player = new Player(this, 400, 300)
-    this.enemy = new Enemy(this, 650, 300)
+    this.enemies = this.add.group([
+      new Enemy(this, 650, 300),
+      new Enemy(this, 200, 150),
+      new Enemy(this, 150, 450),
+    ])
     this.projectiles = this.add.group()
     this.physics.add.overlap(
-        this.projectiles,
-        this.enemy,
-        (projectile) => {
-            projectile.destroy()
-            this.enemy.takeDamage(1)
-        },
+      this.projectiles,
+      this.enemies,
+      (projectile, enemy) => {
+        if (!(projectile instanceof Projectile) || !projectile.active ||
+            !(enemy instanceof Enemy) || !enemy.active) {
+          return
+        }
+
+        projectile.destroy()
+        enemy.takeDamage(1)
+      },
     )
   }
 
   update(time: number) {
     this.player.update()
 
-        if (this.player.isMoving()) {
-            return
-        }
+    if (this.player.isMoving()) {
+      return
+    }
 
-        if (!this.enemy.active) {
-            return
-        }
+    if (time - this.lastShotTime < this.shotCooldown) {
+      return
+    }
 
-        if (time - this.lastShotTime < this.shotCooldown) {
-            return
-        }
+    const target = this.findNearestEnemy()
 
-        const projectile = new Projectile(
-            this,
-            this.player.x,
-            this.player.y,
-            this.enemy.x,
-            this.enemy.y,
-        )
+    if (!target) {
+      return
+    }
 
-        this.projectiles.add(projectile)
+    const projectile = new Projectile(
+      this,
+      this.player.x,
+      this.player.y,
+      target.x,
+      target.y,
+    )
 
-        this.lastShotTime = time
-        }
+    this.projectiles.add(projectile)
+    this.lastShotTime = time
+  }
+
+  private findNearestEnemy(): Enemy | undefined {
+    let nearest: Enemy | undefined
+    let nearestDistanceSquared = Infinity
+
+    for (const enemy of this.enemies.getChildren()) {
+      if (!(enemy instanceof Enemy) || !enemy.active) {
+        continue
+      }
+
+      const distanceSquared = Phaser.Math.Distance.BetweenPointsSquared(this.player, enemy)
+
+      if (distanceSquared < nearestDistanceSquared) {
+        nearest = enemy
+        nearestDistanceSquared = distanceSquared
+      }
+    }
+
+    return nearest
+  }
 }
