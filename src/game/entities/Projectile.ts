@@ -9,6 +9,9 @@ export interface ProjectileAbilities {
 
 export class Projectile extends Phaser.Physics.Arcade.Sprite {
   private readonly speed = 500
+  private readonly homingTurnRate = Math.PI / 2 // 90 degrees per second.
+  private homingTarget?: Enemy
+  private findHomingTarget?: () => Enemy | undefined
   private readonly hitEnemies = new Set<Enemy>()
   private hasRicocheted = false
   private readonly abilities: ProjectileAbilities
@@ -52,10 +55,36 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
       this.destroy()
     } else if (this.canRicochet() && ricochetTarget) {
       this.hasRicocheted = true
+      this.homingTarget = ricochetTarget
       this.aimAt(ricochetTarget.x, ricochetTarget.y)
     } else if (!this.abilities.piercing) {
       this.destroy()
     }
+  }
+
+  enableHoming(target: Enemy, findTarget: () => Enemy | undefined) {
+    this.homingTarget = target
+    this.findHomingTarget = findTarget
+  }
+
+  private updateHoming(delta: number) {
+    if (!this.findHomingTarget) return
+    if (!this.homingTarget?.active || this.hasHit(this.homingTarget)) {
+      this.homingTarget = this.findHomingTarget()
+    }
+    const target = this.homingTarget
+    if (!target) return
+    const dx = target.x - this.x
+    const dy = target.y - this.y
+    if (dx * dx + dy * dy < 1) return
+
+    const velocity = this.body!.velocity
+    const current = Math.atan2(velocity.y, velocity.x)
+    const desired = Math.atan2(dy, dx)
+    const difference = Math.atan2(Math.sin(desired - current), Math.cos(desired - current))
+    const maxTurn = this.homingTurnRate * Math.max(0, delta) / 1000
+    const angle = current + Math.max(-maxTurn, Math.min(maxTurn, difference))
+    this.setVelocity(Math.cos(angle) * this.speed, Math.sin(angle) * this.speed)
   }
 
   private aimAt(targetX: number, targetY: number) {
@@ -65,6 +94,7 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
 
   preUpdate(time: number, delta: number) {
     super.preUpdate(time, delta)
+    this.updateHoming(delta)
 
     const bounds = this.scene.physics.world.bounds
     const halfWidth = this.displayWidth / 2

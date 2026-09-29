@@ -7,7 +7,7 @@ class Sprite {
   constructor(scene,x,y) { Object.assign(this,{scene,x,y,active:true}) }
   setDisplaySize() {}
   setImmovable() {}
-  setVelocity(x,y) { this.velocity={x,y} }
+  setVelocity(x,y) { this.velocity={x,y}; this.body={velocity:this.velocity} }
   destroy() { this.active=false }
 }
 class Vector2 {
@@ -79,4 +79,32 @@ test('Rapid suppresses second shot without enemies, after Game Over or wave chan
   if(mode==='wave')s.currentWave=2
   timers[0].cb();assert.equal(shots.length,1)
  }
+})
+
+test('Homing turns gradually at 90 degrees/s, keeps speed, retargets or flies straight',()=>{
+ const s=scene(),p=shot(s),a=new Enemy(s,0,100),b=new Enemy(s,100,0)
+ let searches=0
+ p.enableHoming(a,()=>{searches++;return b.active?b:undefined})
+ p.updateHoming(100)
+ assert.ok(Math.abs(Math.atan2(p.velocity.y,p.velocity.x)-Math.PI/20)<1e-9)
+ assert.ok(Math.abs(Math.hypot(p.velocity.x,p.velocity.y)-500)<1e-9)
+ assert.equal(searches,0)
+ a.destroy();p.updateHoming(100)
+ assert.equal(searches,1);assert.equal(p.homingTarget,b)
+ assert.ok(Math.abs(p.velocity.y)<1e-9)
+ b.destroy();const before={...p.velocity};p.updateHoming(100)
+ assert.deepEqual(p.velocity,before)
+})
+test('Homing preserves Ricochet target, excludes pierced enemy and Rapid enables each shot',()=>{
+ const s=scene(),p=shot(s,{piercing:true,ricochet:true}),a=new Enemy(s,100,0),b=new Enemy(s,0,100)
+ p.enableHoming(a,()=>b)
+ p.hit(a,1);p.finishHit(b);p.updateHoming(16)
+ assert.equal(p.homingTarget,b);assert.equal(p.hit(a,1),false)
+ assert.ok(Math.abs(Math.hypot(p.velocity.x,p.velocity.y)-500)<1e-9)
+ const piercing=shot(s,{piercing:true});piercing.enableHoming(a,()=>b)
+ piercing.hit(a,1);piercing.finishHit();piercing.updateHoming(16)
+ assert.equal(piercing.homingTarget,b)
+ const f=combat();f.s.update(500);f.timers[0].cb()
+ assert.equal(f.shots.length,2)
+ assert.ok(f.shots.every(projectile=>typeof projectile.findHomingTarget==='function'))
 })

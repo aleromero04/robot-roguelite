@@ -91,3 +91,50 @@ test('enemy retains fractional HP and dies at zero', () => {
   enemy.takeDamage(p.getDamage())
   assert.equal(enemy.active, false)
 })
+
+test('shield blocks entire event, simultaneous overlaps and recharges per wave', () => {
+  const p = makePlayer()
+  p.applyUpgrade('energy-shield')
+  p.applyUpgrade('revive')
+  p.startWave()
+  assert.equal(p.takeDamage(100), true)
+  assert.equal(p.getHealth(), 5)
+  assert.equal(p.isShieldReady(), false)
+  assert.equal(p.isReviveReady(), true)
+  assert.equal(p.takeDamage(100), false)
+  p.scene.time.now = 1000
+  p.takeDamage(1)
+  assert.equal(p.getHealth(), 4)
+  p.startWave()
+  assert.equal(p.isShieldReady(), true)
+  assert.equal(p.takeDamage(1), false) // Invulnerability does not consume shield.
+  assert.equal(p.isShieldReady(), true)
+  p.scene.time.now = 2000
+  p.takeDamage(2)
+  assert.equal(p.getHealth(), 4)
+})
+
+test('revive only on lethal damage, once per run, with 1000 ms protection', () => {
+  const p = makePlayer()
+  p.applyUpgrade('revive')
+  p.takeDamage(1)
+  assert.equal(p.isReviveReady(), true)
+  p.scene.time.now = 1000
+  p.takeDamage(10)
+  assert.equal(p.getHealth(), 3)
+  assert.equal(p.isAlive(), true)
+  assert.equal(p.isReviveReady(), false)
+  p.startWave()
+  p.applyUpgrade('revive') // Does not recharge a consumed unique ability.
+  assert.equal(p.isReviveReady(), false)
+  p.scene.time.now = 1999
+  assert.equal(p.takeDamage(10), false)
+  p.scene.time.now = 2000
+  p.takeDamage(10)
+  assert.equal(p.isAlive(), false)
+  const low = makePlayer()
+  low.maxHealth = 2
+  low.applyUpgrade('revive')
+  low.takeDamage(100)
+  assert.equal(low.getHealth(), 2)
+})

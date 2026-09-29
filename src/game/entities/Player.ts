@@ -14,6 +14,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   private health = this.maxHealth
   private readonly invulnerabilityDuration = 1000
   private invulnerableUntil = 0
+  private shieldReady = false
+  private reviveReady = false
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y, 'player')
@@ -85,6 +87,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   }
 
   applyUpgrade(id: string) {
+    if (id === 'revive' && !this.hasUpgrade(id)) this.reviveReady = true
     this.selectedUpgradeIds.push(id)
 
     switch (id) {
@@ -108,6 +111,18 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     }
   }
 
+  startWave() {
+    this.shieldReady = this.hasUpgrade('energy-shield')
+  }
+
+  isShieldReady(): boolean {
+    return this.shieldReady
+  }
+
+  isReviveReady(): boolean {
+    return this.reviveReady
+  }
+
   isAlive(): boolean {
     return this.health > 0
   }
@@ -119,8 +134,20 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       return false
     }
 
-    this.health = Math.max(0, this.health - amount)
+    // Accepted events (including a shield block) protect against simultaneous overlaps.
     this.invulnerableUntil = now + this.invulnerabilityDuration
+    if (this.shieldReady) {
+      this.shieldReady = false
+      return true
+    }
+
+    if (amount >= this.health && this.reviveReady) {
+      this.reviveReady = false
+      this.health = Math.min(3, this.maxHealth)
+      return true
+    }
+
+    this.health = Math.max(0, this.health - amount)
 
     if (!this.isAlive()) {
       this.setVelocity(0, 0)

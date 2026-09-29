@@ -12,6 +12,7 @@ export class GameScene extends Phaser.Scene {
   private lastShotTime = 0
   private projectiles!: Phaser.GameObjects.Group
   private healthText!: Phaser.GameObjects.Text
+  private abilityText!: Phaser.GameObjects.Text
   private waveText!: Phaser.GameObjects.Text
   private state: GameState = 'START'
   private currentWave: 1 | 2 = 1
@@ -50,6 +51,10 @@ export class GameScene extends Phaser.Scene {
       color: '#ffffff',
     }).setDepth(1)
 
+    this.abilityText = this.add.text(16, 48, '', {
+      fontSize: '18px', color: '#ffffff',
+    }).setDepth(1)
+
     this.waveText = this.add.text(400, 70, '', {
       fontSize: '32px',
       color: '#ffffff',
@@ -61,7 +66,7 @@ export class GameScene extends Phaser.Scene {
         return
       }
 
-      this.healthText.setText(`HP: ${this.player.getHealth()} / ${this.player.getMaxHealth()}`)
+      this.updatePlayerUI()
 
       if (!this.player.isAlive()) {
         this.state = 'GAME_OVER'
@@ -157,6 +162,11 @@ export class GameScene extends Phaser.Scene {
       },
     )
 
+    if (this.player.hasUpgrade('homing-shot')) {
+      projectile.enableHoming(target, () =>
+        this.findNearestEnemy(projectile, enemy => !projectile.hasHit(enemy)),
+      )
+    }
     this.projectiles.add(projectile)
     return true
   }
@@ -190,7 +200,21 @@ export class GameScene extends Phaser.Scene {
       .on('pointerdown', onClick)
   }
 
+  private updatePlayerUI() {
+    this.healthText.setText(`HP: ${this.player.getHealth()} / ${this.player.getMaxHealth()}`)
+    const lines: string[] = []
+    if (this.player.hasUpgrade('energy-shield')) {
+      lines.push(`SHIELD: ${this.player.isShieldReady() ? 'READY' : 'USED'}`)
+    }
+    if (this.player.hasUpgrade('revive')) {
+      lines.push(`REVIVE: ${this.player.isReviveReady() ? 'READY' : 'USED'}`)
+    }
+    this.abilityText.setText(lines.join('\n'))
+  }
+
   private startWave(wave: 1 | 2) {
+    this.player.startWave()
+    this.updatePlayerUI()
     this.currentWave = wave
     this.spawnWave(wave === 1 ? 5 : 7)
     this.lastShotTime = this.time.now
@@ -243,7 +267,7 @@ export class GameScene extends Phaser.Scene {
           if (this.state !== 'UPGRADE_SELECTION') return
           this.state = 'COUNTDOWN'
           this.player.applyUpgrade(upgrade.id)
-          this.healthText.setText(`HP: ${this.player.getHealth()} / ${this.player.getMaxHealth()}`)
+          this.updatePlayerUI()
           cards.forEach(card => card.destroy())
           this.startCountdown()
         }),
