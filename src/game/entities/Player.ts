@@ -4,6 +4,9 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys
   private wasd: Record<string, Phaser.Input.Keyboard.Key>
   private readonly speed = 220
+  private health = 5
+  private readonly invulnerabilityDuration = 1000
+  private invulnerableUntil = 0
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y, 'player')
@@ -25,6 +28,11 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   }
 
   update() {
+    if (!this.isAlive()) {
+      this.setVelocity(0, 0)
+      return
+    }
+
     let x = 0
     let y = 0
 
@@ -41,7 +49,32 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
     this.setVelocity(direction.x, direction.y)
   }
-    isMoving(): boolean {
-        return this.body!.velocity.lengthSq() > 0
+  getHealth(): number {
+    return this.health
+  }
+
+  isAlive(): boolean {
+    return this.health > 0
+  }
+
+  takeDamage(amount: number): boolean {
+    const now = this.scene.time.now
+
+    if (!this.isAlive() || now < this.invulnerableUntil || amount <= 0) {
+      return false
     }
+
+    this.health = Math.max(0, this.health - amount)
+    this.invulnerableUntil = now + this.invulnerabilityDuration
+
+    if (!this.isAlive()) {
+      this.setVelocity(0, 0)
+    }
+
+    return true
+  }
+
+  isMoving(): boolean {
+    return this.body!.velocity.lengthSq() > 0
+  }
 }

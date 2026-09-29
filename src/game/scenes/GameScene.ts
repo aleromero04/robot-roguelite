@@ -9,6 +9,7 @@ export class GameScene extends Phaser.Scene {
   private lastShotTime = 0
   private readonly shotCooldown = 500
   private projectiles!: Phaser.GameObjects.Group
+  private healthText!: Phaser.GameObjects.Text
 
   constructor() {
     super('GameScene')
@@ -43,6 +44,32 @@ export class GameScene extends Phaser.Scene {
       new Enemy(this, 150, 450),
     ])
     this.projectiles = this.add.group()
+    this.healthText = this.add.text(16, 16, `HP: ${this.player.getHealth()}`, {
+      fontSize: '24px',
+      color: '#ffffff',
+    }).setDepth(1)
+
+    this.physics.add.overlap(this.player, this.enemies, (_player, enemy) => {
+      if (!(enemy instanceof Enemy) || !enemy.active || !this.player.takeDamage(1)) {
+        return
+      }
+
+      this.healthText.setText(`HP: ${this.player.getHealth()}`)
+
+      if (!this.player.isAlive()) {
+        for (const remainingEnemy of this.enemies.getChildren()) {
+          if (remainingEnemy instanceof Enemy && remainingEnemy.active) {
+            remainingEnemy.setVelocity(0, 0)
+          }
+        }
+
+        this.add.text(400, 300, 'GAME OVER', {
+          fontSize: '48px',
+          color: '#ffffff',
+        }).setOrigin(0.5).setDepth(1)
+      }
+    })
+
     this.physics.add.overlap(
       this.projectiles,
       this.enemies,
@@ -59,6 +86,10 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number) {
+    if (!this.player.isAlive()) {
+      return
+    }
+
     this.player.update()
 
     for (const enemy of this.enemies.getChildren()) {
