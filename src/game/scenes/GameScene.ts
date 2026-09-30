@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { preloadArena, createArena } from '../environment/ArenaVisuals'
 import { CHARACTERS, getCharacterSpawnMargin } from '../visuals/characters'
 import { Player } from '../entities/Player'
 import { Boss } from '../entities/Boss'
@@ -31,6 +32,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   preload() {
+    preloadArena(this)
     for (const key of Object.keys(CHARACTERS)) {
       if (!this.textures.exists(key)) this.load.image(key, `assets/characters/${key}.png`)
     }
@@ -42,6 +44,7 @@ export class GameScene extends Phaser.Scene {
     this.nextGroupIndex = 0
     this.lastShotTime = 0
     this.cameras.main.setBackgroundColor('#151922')
+    createArena(this)
 
     for (const [key, config] of Object.entries(CHARACTERS)) {
       const texture = this.textures.get(key)

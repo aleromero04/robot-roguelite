@@ -26,7 +26,7 @@ class Vector2 {
   normalize() { const n=Math.hypot(this.x,this.y);if(n){this.x/=n;this.y/=n}return this }
 }
 const phaser={TintModes:{FILL:1},Scene:class {},Physics:{Arcade:{Sprite}},Math:{Vector2,Between:(min,max)=>Math.floor(Math.random()*(max-min+1))+min,Distance:{BetweenPointsSquared:(a,b)=>(a.x-b.x)**2+(a.y-b.y)**2}}}
-const modules={'../visuals/characters':{configureCharacter(){},CHARACTERS:{}}}
+const modules={'../environment/ArenaVisuals':{preloadArena(){},createArena(){}},'../visuals/characters':{configureCharacter(){},CHARACTERS:{}}}
 const graphics=()=>({clear(){},fillStyle(){},fillRect(){},setDepth(){return this}})
 function load(path,name) {
   const context={exports:{},require:id=>id==='phaser'?phaser:modules[id]??{}}
