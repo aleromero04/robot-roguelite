@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { configureCharacter } from '../visuals/characters'
 
 export type EnemyType = 'basic' | 'runner' | 'shooter'
 
@@ -11,9 +12,9 @@ export interface EnemyStats {
 }
 
 const ENEMY_STATS = {
-  basic: { health: 3, speed: 90, contactDamage: 1, texture: 'enemy' },
-  runner: { health: 1.5, speed: 160, contactDamage: 1, texture: 'runner' },
-  shooter: { health: 2, speed: 70, contactDamage: 1, texture: 'shooter' },
+  basic: { health: 3, speed: 90, contactDamage: 1, texture: 'enemy-basic' },
+  runner: { health: 1.5, speed: 160, contactDamage: 1, texture: 'enemy-runner' },
+  shooter: { health: 2, speed: 70, contactDamage: 1, texture: 'enemy-shooter' },
 } satisfies Record<EnemyType, { health: number; speed: number; contactDamage: number; texture: string }>
 
 
@@ -23,6 +24,8 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   private nextShotTime: number
   private rangeMovement: 'approach' | 'hold' | 'retreat' = 'hold'
   private health: number
+  private readonly maxHealth: number
+  private flashUntil = 0
   private readonly speed: number
   readonly contactDamage: number
   private readonly lateralStrength = 0.25
@@ -39,13 +42,14 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     this.enemyType = typeof type === 'string' ? type : 'basic'
     this.nextShotTime = scene.time.now + this.shotCooldown
     this.health = stats.health
+    this.maxHealth = stats.health
     this.speed = stats.speed
     this.contactDamage = stats.contactDamage
 
     scene.add.existing(this)
     scene.physics.add.existing(this)
 
-    this.setDisplaySize(stats.size ?? 40, stats.size ?? 40)
+    configureCharacter(this, stats.size ?? 40)
     this.setImmovable(true)
     if (type === 'shooter') this.setCollideWorldBounds(true)
   }
@@ -133,9 +137,23 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     }
   }
 
+  getHealth(): number { return this.health }
+
+  getMaxHealth(): number { return this.maxHealth }
+
+  override preUpdate(time: number, delta: number) {
+    super.preUpdate(time, delta)
+    if (this.flashUntil && this.scene.time.now >= this.flashUntil) {
+      this.clearTint()
+      this.flashUntil = 0
+    }
+  }
+
   takeDamage(amount: number) {
     if (!this.active) return
     this.health -= amount
+    this.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL)
+    this.flashUntil = this.scene.time.now + 80
 
     if (this.health <= 0) {
       this.clearBurn()

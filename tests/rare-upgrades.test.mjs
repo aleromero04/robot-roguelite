@@ -3,9 +3,14 @@ import test from 'node:test'
 import fs from 'node:fs'
 import vm from 'node:vm'
 import ts from 'typescript'
+import { createRequire } from 'node:module'
+const ArcadeBody = createRequire(import.meta.url)('../node_modules/phaser/src/physics/arcade/Body.js')
 class Sprite {
   constructor(scene,x,y,texture) { Object.assign(this,{scene,x,y,texture,active:true}) }
   setDisplaySize() {}
+  setTint() { this.tinted=true;return this }
+  setTintMode() { return this }
+  clearTint() { this.tinted=false }
   setVisible() {return this}
   setImmovable() {}
   setCollideWorldBounds() {}
@@ -20,13 +25,16 @@ class Vector2 {
   scale(n) { this.x*=n;this.y*=n;return this }
   normalize() { const n=Math.hypot(this.x,this.y);if(n){this.x/=n;this.y/=n}return this }
 }
-const phaser={Scene:class {},Physics:{Arcade:{Sprite}},Math:{Vector2,Between:(min,max)=>Math.floor(Math.random()*(max-min+1))+min,Distance:{BetweenPointsSquared:(a,b)=>(a.x-b.x)**2+(a.y-b.y)**2}}}
-const modules={}
+const phaser={TintModes:{FILL:1},Scene:class {},Physics:{Arcade:{Sprite}},Math:{Vector2,Between:(min,max)=>Math.floor(Math.random()*(max-min+1))+min,Distance:{BetweenPointsSquared:(a,b)=>(a.x-b.x)**2+(a.y-b.y)**2}}}
+const modules={'../visuals/characters':{configureCharacter(){},CHARACTERS:{}}}
+const graphics=()=>({clear(){},fillStyle(){},fillRect(){},setDepth(){return this}})
 function load(path,name) {
   const context={exports:{},require:id=>id==='phaser'?phaser:modules[id]??{}}
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(`src/game/${path}.ts`,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context)
   return context.exports[name]
 }
+modules['../visuals/characters'].CHARACTERS=load('visuals/characters','CHARACTERS')
+modules['../visuals/characters'].getCharacterSpawnMargin=load('visuals/characters','getCharacterSpawnMargin')
 const Enemy=load('entities/Enemy','Enemy');modules['../entities/Enemy']={Enemy};modules['./Enemy']={Enemy}
 const Boss=load('entities/Boss','Boss');modules['../entities/Boss']={Boss}
 const Projectile=load('entities/Projectile','Projectile');modules['../entities/Projectile']={Projectile}
@@ -72,7 +80,7 @@ test('flame adds burn to direct damage and repeated overlap does not refresh',()
 })
 function combat() {
  const s=new GameScene(),enemies=[new Enemy(scene(),100,0),new Enemy(scene(),200,0)],shots=[],timers=[]
- Object.assign(s,{state:'COMBAT',currentWave:1,nextGroupIndex:1,time:{now:500,delayedCall:(delay,cb)=>timers.push({delay,cb})},add:{existing(){}},physics:{add:{existing(){}}},enemies:{getChildren:()=>enemies,countActive:()=>enemies.filter(e=>e.active).length},projectiles:{add:p=>shots.push(p)}})
+ Object.assign(s,{enemyHealthBars:graphics(),state:'COMBAT',currentWave:1,nextGroupIndex:1,time:{now:500,delayedCall:(delay,cb)=>timers.push({delay,cb})},add:{existing(){}},physics:{add:{existing(){}}},enemies:{getChildren:()=>enemies,countActive:()=>enemies.filter(e=>e.active).length},projectiles:{add:p=>shots.push(p)}})
  let moving=false
  s.player={x:0,y:0,isAlive:()=>true,update(){},isMoving:()=>moving,getAttackCooldown:()=>500/1.15,getBurstSize:()=>2,hasUpgrade:()=>true}
  enemies.forEach(e=>{e.chase=()=>{}})
@@ -151,7 +159,7 @@ test('Triple cancels pending shots after combat, wave change or no targets',()=>
 
 test('Basic and Runner share chase but preserve their health, speed and contact damage',()=>{
  const s=scene();s.time.now=1000
- for(const [type,hp,speed,texture] of [['basic',3,90,'enemy'],['runner',1.5,160,'runner']]) {
+ for(const [type,hp,speed,texture] of [['basic',3,90,'enemy-basic'],['runner',1.5,160,'enemy-runner']]) {
   const enemy=new Enemy(s,0,0,type)
   assert.equal(enemy.health,hp);assert.equal(enemy.contactDamage,1);assert.equal(enemy.texture,texture)
   enemy.chase(100,100)
@@ -175,15 +183,15 @@ test('Waves 1 and 2 each spawn their single Basic group safely',()=>{
  for(const wave of [1,2]) {
   const s=new GameScene(),items=[]
   Object.assign(s,{
-   player:{x:400,y:300,startWave(){}},updatePlayerUI(){},
+   enemyHealthBars:graphics(),player:{x:400,y:300,startWave(){}},updatePlayerUI(){},
    add:{existing(){}},physics:{add:{existing(){}},world:{bounds:{left:0,right:800,top:0,bottom:600}}},
    enemies:{getChildren:()=>items,add:e=>items.push(e)},
    time:{now:0,delayedCall(){}},waveText:{setText(){return this},setVisible(){return this}},
   })
   s.startWave(wave)
-  assert.equal(items.filter(e=>e.texture==='enemy').length,wave===1?5:7)
-  assert.equal(items.filter(e=>e.texture==='runner').length,0)
-  assert.equal(items.filter(e=>e.texture==='shooter').length,0)
+  assert.equal(items.filter(e=>e.texture==='enemy-basic').length,wave===1?5:7)
+  assert.equal(items.filter(e=>e.texture==='enemy-runner').length,0)
+  assert.equal(items.filter(e=>e.texture==='enemy-shooter').length,0)
   for(const [i,e] of items.entries()) {
    assert.ok(e.x>=20&&e.x<=780&&e.y>=20&&e.y<=580)
    assert.ok(Math.hypot(e.x-400,e.y-300)>=280)
@@ -264,7 +272,7 @@ function waveFixture() {
  phaser.Input={Keyboard:{KeyCodes:{}}}
  const Player=load('entities/Player','Player')
  Object.assign(s,{
-  add:{existing(){},text},physics:{add:{existing(){}},world:{bounds:{left:0,right:800,top:0,bottom:600}}},
+  enemyHealthBars:graphics(),add:{existing(){},text,graphics},physics:{add:{existing(){}},world:{bounds:{left:0,right:800,top:0,bottom:600}}},
   input:{keyboard:{createCursorKeys:()=>({}),addKeys:()=>({})}},
   time:{now:0,delayedCall:(delay,cb)=>timers.push({at:s.time.now+delay,cb})},
   enemies:{getChildren:()=>items,clear(){items.forEach(e=>e.destroy());items.length=0},add:e=>{e.updateBehavior=()=>{};items.push(e)},countActive:()=>items.filter(e=>e.active).length},
@@ -418,7 +426,7 @@ test('create after restart resets run fields and creates a fresh Player and empt
  const oldPlayer=s.player;s.currentWave=7;s.nextGroupIndex=3;s.lastShotTime=9000;s.state='VICTORY'
  s.cameras={main:{setBackgroundColor(){}}}
  s.physics.world.setBounds=()=>{};s.physics.add.overlap=()=>{}
- const textures=new Set();s.textures={exists:key=>textures.has(key)}
+ const textures=new Set();s.textures={exists:key=>textures.has(key),get:()=>({has:()=>true})}
  s.make={graphics:()=>({fillStyle(){},fillRect(){},fillCircle(){},generateTexture(key){assert.equal(textures.has(key),false);textures.add(key)},destroy(){}})}
  s.add.group=()=>({getChildren:()=>[],countActive:()=>0})
  for(let i=0;i<2;i++) {
@@ -440,4 +448,134 @@ test('boss contact blocks full 2 damage with Shield, revives once, then Game Ove
  assert.equal(f.s.state,'GAME_OVER');assert.equal(f.items[0].velocity.x,0)
  assert.equal(f.s.enemyProjectiles.cleared,true)
  f.s.update(10000);assert.equal(f.s.state,'GAME_OVER')
+})
+
+test('enemy damage flashes briefly and health bars follow fractional HP and disappear on death',()=>{
+ const f=waveFixture(),e=new Enemy(f.s,120,140,'runner')
+ e.displayHeight=44;f.items.push(e)
+ e.takeDamage(0.25)
+ assert.equal(e.getMaxHealth(),1.5);assert.equal(e.getHealth(),1.25);assert.equal(e.tinted,true)
+ f.s.time.now=79;e.preUpdate(79,16);assert.equal(e.tinted,true)
+ f.s.time.now=80;e.preUpdate(80,1);assert.equal(e.tinted,false)
+ const rects=[]
+ f.s.enemyHealthBars={clear(){rects.length=0},fillStyle(){},fillRect(...args){rects.push(args)}}
+ f.s.drawEnemyHealthBars()
+ assert.deepEqual(rects[1],[104,109,32*1.25/1.5,4])
+ e.x=180;f.s.drawEnemyHealthBars();assert.equal(rects[1][0],164)
+ e.takeDamage(2);f.s.drawEnemyHealthBars();assert.equal(rects.length,0)
+ const boss=new Boss(f.s,400,100);f.items.push(boss);boss.takeDamage(20)
+ f.s.drawEnemyHealthBars();assert.deepEqual(rects[1],[280,24,120,10])
+})
+test('preload requests the five PNG textures and reuses them on restart',()=>{
+ const s=new GameScene(),loaded=[]
+ s.textures={exists:()=>false};s.load={image:(...args)=>loaded.push(args)}
+ s.preload()
+ assert.deepEqual(loaded.map(a=>a[0]),['player','enemy-basic','enemy-runner','enemy-shooter','enemy-boss'])
+ assert.ok(loaded.every(([key,path])=>path===`assets/characters/${key}.png`))
+ s.textures.exists=()=>true;s.preload();assert.equal(loaded.length,5)
+})
+
+test('all enemy types spawn fully visible on each edge; boss fits all four corners',()=>{
+ const {CHARACTERS}=modules['../visuals/characters']
+ const inside=(enemy,key,bodySize)=>{
+  const c=CHARACTERS[key],scale=c.size/Math.max(c.bounds[2],c.bounds[3])
+  const halfWidth=c.bounds[2]*scale/2,halfHeight=c.bounds[3]*scale/2
+  assert.ok(enemy.x-halfWidth>=0 && enemy.x+halfWidth<=800)
+  assert.ok(enemy.y-halfHeight>=0 && enemy.y+halfHeight<=600)
+  assert.ok(enemy.x-bodySize/2>=0 && enemy.x+bodySize/2<=800)
+  assert.ok(enemy.y-bodySize/2>=0 && enemy.y+bodySize/2<=600)
+ }
+ const original=phaser.Math.Between
+ try {
+  for(const type of ['basic','runner','shooter'])for(const edge of [0,1,2,3]) {
+   phaser.Math.Between=(min,max)=>min===0&&max===3?edge:min
+   const f=waveFixture();f.s.spawnGroup([type])
+   inside(f.items[0],`enemy-${type}`,40)
+   assert.ok(Math.hypot(f.items[0].x-400,f.items[0].y-300)>=280)
+   // Force failed random retries against the first spawn to exercise edge fallback.
+   f.s.spawnGroup([type])
+   inside(f.items[1],`enemy-${type}`,40)
+   assert.ok(Math.hypot(f.items[0].x-f.items[1].x,f.items[0].y-f.items[1].y)>=60)
+  }
+ } finally {phaser.Math.Between=original}
+ const corners=new Set()
+ for(const [x,y] of [[100,100],[700,100],[100,500],[700,500]]) {
+  const f=waveFixture();f.s.player.x=x;f.s.player.y=y;f.s.startWave(7)
+  inside(f.items[0],'enemy-boss',80)
+  corners.add(`${f.items[0].x},${f.items[0].y}`)
+ }
+ assert.equal(corners.size,4)
+})
+
+test('real Arcade postUpdate preserves initial and reinforcement spawns in W3-W5, random and fallback',()=>{
+ const visual=modules['../visuals/characters'],oldConfigure=visual.configureCharacter,oldRandom=phaser.Math.Between
+ const dimensions={'enemy-basic':[1305,1205],'enemy-runner':[1297,1212],'enemy-shooter':[1306,1205]}
+ try {
+  for(const wave of [3,4,5])for(const fallback of [false,true]) {
+   visual.configureCharacter=oldConfigure
+   const f=waveFixture(),bodies=[]
+   visual.configureCharacter=load('visuals/characters','configureCharacter')
+   f.s.physics.add.existing=sprite=>{
+    const key=sprite.texture,[w,h]=dimensions[key]
+    Object.assign(sprite,{texture:{key},width:w,height:h,scaleX:1,scaleY:1,angle:0,
+     displayOriginX:w/2,displayOriginY:h/2,
+     getCenter(){},
+     setFrame(){const c=visual.CHARACTERS[key];this.width=c.bounds[2];this.height=c.bounds[3];this.displayOriginX=this.width/2;this.displayOriginY=this.height/2},
+     setScale(n){this.scaleX=this.scaleY=n},
+    })
+    Object.defineProperties(sprite,{
+     displayWidth:{get(){return this.width*this.scaleX}},
+     displayHeight:{get(){return this.height*this.scaleY}},
+    })
+    sprite.body=new ArcadeBody({defaults:{},bounds:f.s.physics.world.bounds},sprite)
+    bodies.push(sprite.body)
+   }
+   const check=(items)=>{
+    for(const e of items) {
+     assert.ok(e.x-e.displayWidth/2>=-1e-9 && e.x+e.displayWidth/2<=800+1e-9)
+     assert.ok(e.y-e.displayHeight/2>=-1e-9 && e.y+e.displayHeight/2<=600+1e-9)
+     assert.ok(Math.abs(e.body.width-40)<1e-9 && Math.abs(e.body.height-40)<1e-9)
+     assert.ok(Math.hypot(e.x-f.s.player.x,e.y-f.s.player.y)>=280-1e-9)
+    }
+   }
+   f.s.startWave(wave)
+   // Group 1 exists before the next physics preUpdate.
+   bodies.forEach(b=>{b.preUpdate(false,1/60);b.postUpdate()})
+   check(f.items)
+   for(const group of WAVES[wave].groups.slice(1)) {
+    f.killTo(group.spawnAtAlive)
+    bodies.filter(b=>b.gameObject.active).forEach(b=>b.preUpdate(false,1/60))
+    const before=f.items.length
+    if(fallback) {
+     // Force all random candidates to the player's corner; safe edge search must recover.
+     f.s.player.x=25;f.s.player.y=25
+     phaser.Math.Between=(min,max)=>min
+    }
+    f.s.update(0)
+    phaser.Math.Between=oldRandom
+    const added=f.items.slice(before),positions=added.map(e=>[e.x,e.y])
+    assert.equal(added.length,Object.values(group.enemies).reduce((a,b)=>a+b,0))
+    check(added)
+    // New bodies skipped preUpdate this frame, just as in the running game.
+    bodies.filter(b=>b.gameObject.active).forEach(b=>b.postUpdate())
+    check(added)
+    added.forEach((e,i)=>{assert.equal(e.x,positions[i][0]);assert.equal(e.y,positions[i][1])})
+    f.s.update(0);assert.equal(f.items.length,before+added.length)
+    f.s.player.x=400;f.s.player.y=300
+   }
+  }
+ } finally {visual.configureCharacter=oldConfigure;phaser.Math.Between=oldRandom}
+})
+test('crowded edge fallback relaxes enemy separation, never arena bounds or player distance',()=>{
+ const f=waveFixture(),original=phaser.Math.Between
+ for(let x=0;x<=800;x+=40)for(let y=0;y<=600;y+=40) f.items.push(new Enemy(f.s,x,y))
+ try {
+  phaser.Math.Between=min=>min
+  const before=f.items.length
+  f.s.spawnGroup(['shooter'])
+  assert.equal(f.items.length,before+1)
+  const e=f.items.at(-1)
+  assert.ok(e.x>=27&&e.x<=773&&e.y>=25&&e.y<=575)
+  assert.ok(Math.hypot(e.x-400,e.y-300)>=280)
+ } finally {phaser.Math.Between=original}
 })

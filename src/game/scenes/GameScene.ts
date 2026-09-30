@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { CHARACTERS, getCharacterSpawnMargin } from '../visuals/characters'
 import { Player } from '../entities/Player'
 import { Boss } from '../entities/Boss'
 import { Enemy } from '../entities/Enemy'
@@ -17,6 +18,7 @@ export class GameScene extends Phaser.Scene {
   private lastShotTime = 0
   private enemyProjectiles!: Phaser.GameObjects.Group
   private projectiles!: Phaser.GameObjects.Group
+  private enemyHealthBars!: Phaser.GameObjects.Graphics
   private healthText!: Phaser.GameObjects.Text
   private abilityText!: Phaser.GameObjects.Text
   private waveText!: Phaser.GameObjects.Text
@@ -28,6 +30,12 @@ export class GameScene extends Phaser.Scene {
     super('GameScene')
   }
 
+  preload() {
+    for (const key of Object.keys(CHARACTERS)) {
+      if (!this.textures.exists(key)) this.load.image(key, `assets/characters/${key}.png`)
+    }
+  }
+
   create() {
     this.state = 'START'
     this.currentWave = 1
@@ -35,35 +43,12 @@ export class GameScene extends Phaser.Scene {
     this.lastShotTime = 0
     this.cameras.main.setBackgroundColor('#151922')
 
-    const graphics = this.make.graphics({ x: 0, y: 0 }, false)
-    graphics.fillStyle(0x4ade80)
-    graphics.fillRect(0, 0, 40, 40)
-    if (!this.textures.exists('player')) graphics.generateTexture('player', 40, 40)
-    graphics.destroy()
-
-    const enemyGraphics = this.make.graphics({ x: 0, y: 0 }, false)
-    enemyGraphics.fillStyle(0xef4444)
-    enemyGraphics.fillRect(0, 0, 40, 40)
-    if (!this.textures.exists('enemy')) enemyGraphics.generateTexture('enemy', 40, 40)
-    enemyGraphics.destroy()
-
-    const runnerGraphics = this.make.graphics({ x: 0, y: 0 }, false)
-    runnerGraphics.fillStyle(0x22d3ee)
-    runnerGraphics.fillRect(0, 0, 40, 40)
-    if (!this.textures.exists('runner')) runnerGraphics.generateTexture('runner', 40, 40)
-    runnerGraphics.destroy()
-
-    const shooterGraphics = this.make.graphics({ x: 0, y: 0 }, false)
-    shooterGraphics.fillStyle(0xa855f7)
-    shooterGraphics.fillRect(0, 0, 40, 40)
-    if (!this.textures.exists('shooter')) shooterGraphics.generateTexture('shooter', 40, 40)
-    shooterGraphics.destroy()
-
-    const bossGraphics = this.make.graphics({ x: 0, y: 0 }, false)
-    bossGraphics.fillStyle(0xf472b6)
-    bossGraphics.fillRect(0, 0, 80, 80)
-    if (!this.textures.exists('boss')) bossGraphics.generateTexture('boss', 80, 80)
-    bossGraphics.destroy()
+    for (const [key, config] of Object.entries(CHARACTERS)) {
+      const texture = this.textures.get(key)
+      const [x, y, width, height] = config.bounds
+      if (!texture.has('character')) texture.add('character', 0, x, y, width, height)
+    }
+    this.enemyHealthBars = this.add.graphics().setDepth(1)
 
     const enemyShotGraphics = this.make.graphics({ x: 0, y: 0 }, false)
     enemyShotGraphics.fillStyle(0xf97316)
@@ -125,6 +110,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number) {
+    this.drawEnemyHealthBars()
     if (this.state !== 'COMBAT' || !this.player.isAlive()) {
       return
     }
@@ -231,6 +217,22 @@ export class GameScene extends Phaser.Scene {
       .on('pointerdown', onClick)
   }
 
+  private drawEnemyHealthBars() {
+    this.enemyHealthBars.clear()
+    for (const enemy of this.enemies.getChildren()) {
+      if (!(enemy instanceof Enemy) || !enemy.active) continue
+      const boss = enemy instanceof Boss
+      const width = boss ? 240 : 32
+      const height = boss ? 10 : 4
+      const x = boss ? 280 : enemy.x - width / 2
+      const y = boss ? 24 : Math.max(2, enemy.y - enemy.displayHeight / 2 - 9)
+      this.enemyHealthBars.fillStyle(0x101827, 0.9)
+      this.enemyHealthBars.fillRect(x - 1, y - 1, width + 2, height + 2)
+      this.enemyHealthBars.fillStyle(boss ? 0xf472b6 : 0x4ade80)
+      this.enemyHealthBars.fillRect(x, y, width * Math.max(0, enemy.getHealth() / enemy.getMaxHealth()), height)
+    }
+  }
+
   private damagePlayer(amount: number) {
     if (this.state !== 'COMBAT' || !this.player.takeDamage(amount)) return
     this.updatePlayerUI()
@@ -284,11 +286,12 @@ export class GameScene extends Phaser.Scene {
       this.stopCombat()
       this.enemies.clear(true, true)
       const bounds = this.physics.world.bounds
+      const margin = getCharacterSpawnMargin('enemy-boss', 80)
       const corners = [
-        { x: bounds.left + 40, y: bounds.top + 40 },
-        { x: bounds.right - 40, y: bounds.top + 40 },
-        { x: bounds.left + 40, y: bounds.bottom - 40 },
-        { x: bounds.right - 40, y: bounds.bottom - 40 },
+        { x: bounds.left + margin.x, y: bounds.top + margin.y },
+        { x: bounds.right - margin.x, y: bounds.top + margin.y },
+        { x: bounds.left + margin.x, y: bounds.bottom - margin.y },
+        { x: bounds.right - margin.x, y: bounds.bottom - margin.y },
       ]
       corners.sort((a, b) => Phaser.Math.Distance.BetweenPointsSquared(b, this.player) -
         Phaser.Math.Distance.BetweenPointsSquared(a, this.player))
@@ -385,22 +388,23 @@ export class GameScene extends Phaser.Scene {
 
   private spawnGroup(composition: readonly EnemyType[]) {
     const bounds = this.physics.world.bounds
-    // Keep the complete 40 x 40 enemy inside the world.
-    const margin = 20
-    const left = bounds.left + margin
-    const right = bounds.right - margin
-    const top = bounds.top + margin
-    const bottom = bounds.bottom - margin
     const minDistance = 60
     const maxAttempts = 100
+    const isAwayFromPlayer = (x: number, y: number) =>
+      Phaser.Math.Distance.BetweenPointsSquared({ x, y }, this.player) >= 280 ** 2
     const isSeparated = (x: number, y: number) =>
-      Phaser.Math.Distance.BetweenPointsSquared({ x, y }, this.player) >= 280 ** 2 &&
+      isAwayFromPlayer(x, y) &&
       this.enemies.getChildren().every(
       enemy => !(enemy instanceof Enemy) || !enemy.active ||
         Phaser.Math.Distance.BetweenPointsSquared({ x, y }, enemy) >= minDistance ** 2,
     )
 
     for (const type of composition) {
+      const margin = getCharacterSpawnMargin(`enemy-${type}`, 40)
+      const left = bounds.left + margin.x
+      const right = bounds.right - margin.x
+      const top = bounds.top + margin.y
+      const bottom = bounds.bottom - margin.y
       let position: { x: number; y: number } | undefined
 
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -423,7 +427,8 @@ export class GameScene extends Phaser.Scene {
         for (let y = top; y <= bottom; y += minDistance) {
           candidates.push({ x: left, y }, { x: right, y })
         }
-        position = candidates.find(({ x, y }) => isSeparated(x, y))
+        position = candidates.find(({ x, y }) => isSeparated(x, y)) ??
+          candidates.find(({ x, y }) => isAwayFromPlayer(x, y))
       }
 
       if (!position) {

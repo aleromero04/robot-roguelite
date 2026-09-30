@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { configureCharacter } from '../visuals/characters'
 
 export class Player extends Phaser.Physics.Arcade.Sprite {
   private cursors: Phaser.Types.Input.Keyboard.CursorKeys
@@ -23,7 +24,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     scene.add.existing(this)
     scene.physics.add.existing(this)
 
-    this.setDisplaySize(40, 40)
+    configureCharacter(this, 40)
     this.setCollideWorldBounds(true)
 
     this.cursors = scene.input.keyboard!.createCursorKeys()

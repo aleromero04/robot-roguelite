@@ -8,15 +8,17 @@ import ts from 'typescript'
 class Sprite {
   constructor(scene) { this.scene = scene; this.active = true }
   setDisplaySize() {}
+  setTint() { return this }
+  setTintMode() { return this }
   setCollideWorldBounds() {}
   setImmovable() {}
   setVelocity() {}
   destroy() { this.active = false }
 }
-const phaser = { Physics: { Arcade: { Sprite } }, Input: { Keyboard: { KeyCodes: {} } } }
+const phaser = { TintModes: { FILL: 1 }, Physics: { Arcade: { Sprite } }, Input: { Keyboard: { KeyCodes: {} } } }
 function loadEntity(name) {
   const source = fs.readFileSync(new URL(`../src/game/entities/${name}.ts`, import.meta.url), 'utf8')
-  const context = { exports: {}, require: () => phaser }
+  const context = { exports: {}, require: id => id === 'phaser' ? phaser : { configureCharacter() {} } }
   vm.runInNewContext(ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText, context)
