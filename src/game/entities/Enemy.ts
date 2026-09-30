@@ -1,14 +1,19 @@
 import Phaser from 'phaser'
 
-export type EnemyType = 'basic' | 'runner'
+export type EnemyType = 'basic' | 'runner' | 'shooter'
 
 const ENEMY_STATS = {
   basic: { health: 3, speed: 90, contactDamage: 1, texture: 'enemy' },
   runner: { health: 1.5, speed: 160, contactDamage: 1, texture: 'runner' },
+  shooter: { health: 2, speed: 70, contactDamage: 1, texture: 'shooter' },
 } satisfies Record<EnemyType, { health: number; speed: number; contactDamage: number; texture: string }>
 
 
 export class Enemy extends Phaser.Physics.Arcade.Sprite {
+  private readonly enemyType: EnemyType
+  private readonly shotCooldown = 1500
+  private nextShotTime: number
+  private rangeMovement: 'approach' | 'hold' | 'retreat' = 'hold'
   private health: number
   private readonly speed: number
   readonly contactDamage: number
@@ -23,6 +28,8 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   constructor(scene: Phaser.Scene, x: number, y: number, type: EnemyType = 'basic') {
     const stats = ENEMY_STATS[type]
     super(scene, x, y, stats.texture)
+    this.enemyType = type
+    this.nextShotTime = scene.time.now + this.shotCooldown
     this.health = stats.health
     this.speed = stats.speed
     this.contactDamage = stats.contactDamage
@@ -32,6 +39,39 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
 
     this.setDisplaySize(40, 40)
     this.setImmovable(true)
+    if (type === 'shooter') this.setCollideWorldBounds(true)
+  }
+
+  updateBehavior(targetX: number, targetY: number, fire: () => void) {
+    if (!this.active) return
+    if (this.enemyType !== 'shooter') {
+      this.chase(targetX, targetY)
+      return
+    }
+
+    const dx = targetX - this.x
+    const dy = targetY - this.y
+    const distance = Math.hypot(dx, dy)
+    if (distance < 200) this.rangeMovement = 'retreat'
+    else if (distance > 300) this.rangeMovement = 'approach'
+    else if (this.rangeMovement === 'approach' && distance <= 280 ||
+             this.rangeMovement === 'retreat' && distance >= 220) {
+      this.rangeMovement = 'hold'
+    }
+
+    if (this.rangeMovement === 'hold') {
+      this.setVelocity(0, 0)
+      if (this.scene.time.now >= this.nextShotTime) {
+        this.nextShotTime = this.scene.time.now + this.shotCooldown
+        fire()
+      }
+    } else {
+      const sign = this.rangeMovement === 'approach' ? 1 : -1
+      // At coincident positions, choose a stable escape direction.
+      const x = distance > 0 ? dx / distance : 1
+      const y = distance > 0 ? dy / distance : 0
+      this.setVelocity(x * this.speed * sign, y * this.speed * sign)
+    }
   }
 
   chase(targetX: number, targetY: number) {

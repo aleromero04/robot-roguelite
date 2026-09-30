@@ -2,6 +2,7 @@ import Phaser from 'phaser'
 import { Player } from '../entities/Player'
 import { Enemy } from '../entities/Enemy'
 import type { EnemyType } from '../entities/Enemy'
+import { EnemyProjectile } from '../entities/EnemyProjectile'
 import { Projectile } from '../entities/Projectile'
 import { generateUpgradeOptions } from '../data/upgrades'
 
@@ -11,6 +12,7 @@ export class GameScene extends Phaser.Scene {
   private player!: Player
   private enemies!: Phaser.GameObjects.Group
   private lastShotTime = 0
+  private enemyProjectiles!: Phaser.GameObjects.Group
   private projectiles!: Phaser.GameObjects.Group
   private healthText!: Phaser.GameObjects.Text
   private abilityText!: Phaser.GameObjects.Text
@@ -43,6 +45,18 @@ export class GameScene extends Phaser.Scene {
     runnerGraphics.generateTexture('runner', 40, 40)
     runnerGraphics.destroy()
 
+    const shooterGraphics = this.make.graphics({ x: 0, y: 0 }, false)
+    shooterGraphics.fillStyle(0xa855f7)
+    shooterGraphics.fillRect(0, 0, 40, 40)
+    shooterGraphics.generateTexture('shooter', 40, 40)
+    shooterGraphics.destroy()
+
+    const enemyShotGraphics = this.make.graphics({ x: 0, y: 0 }, false)
+    enemyShotGraphics.fillStyle(0xf97316)
+    enemyShotGraphics.fillCircle(6, 6, 6)
+    enemyShotGraphics.generateTexture('enemy-projectile', 12, 12)
+    enemyShotGraphics.destroy()
+
     const projectileGraphics = this.make.graphics({ x: 0, y: 0 }, false)
     projectileGraphics.fillStyle(0xfacc15)
     projectileGraphics.fillCircle(5, 5, 5)
@@ -53,6 +67,7 @@ export class GameScene extends Phaser.Scene {
     this.player = new Player(this, 400, 300)
     this.enemies = this.add.group()
     this.projectiles = this.add.group()
+    this.enemyProjectiles = this.add.group()
     this.healthText = this.add.text(16, 16, `HP: ${this.player.getHealth()} / ${this.player.getMaxHealth()}`, {
       fontSize: '24px',
       color: '#ffffff',
@@ -69,27 +84,12 @@ export class GameScene extends Phaser.Scene {
     this.showStartScreen()
 
     this.physics.add.overlap(this.player, this.enemies, (_player, enemy) => {
-      if (this.state !== 'COMBAT' || !(enemy instanceof Enemy) || !enemy.active || !this.player.takeDamage(enemy.contactDamage)) {
-        return
-      }
-
-      this.updatePlayerUI()
-
-      if (!this.player.isAlive()) {
-        this.state = 'GAME_OVER'
-        this.stopCombat()
-        this.waveText.setVisible(false)
-        for (const remainingEnemy of this.enemies.getChildren()) {
-          if (remainingEnemy instanceof Enemy && remainingEnemy.active) {
-            remainingEnemy.setVelocity(0, 0)
-          }
-        }
-
-        this.add.text(400, 300, 'GAME OVER', {
-          fontSize: '48px',
-          color: '#ffffff',
-        }).setOrigin(0.5).setDepth(1)
-      }
+      if (enemy instanceof Enemy && enemy.active) this.damagePlayer(enemy.contactDamage)
+    })
+    this.physics.add.overlap(this.player, this.enemyProjectiles, (_player, projectile) => {
+      if (this.state !== 'COMBAT' || !(projectile instanceof EnemyProjectile) || !projectile.active) return
+      projectile.destroy()
+      this.damagePlayer(projectile.damage)
     })
 
     this.physics.add.overlap(
@@ -126,7 +126,11 @@ export class GameScene extends Phaser.Scene {
       if (enemy instanceof Enemy && enemy.active) {
         enemy.updateBurn(this.time.now)
         if (!enemy.active) continue
-        enemy.chase(this.player.x, this.player.y)
+        enemy.updateBehavior(this.player.x, this.player.y, () => {
+          this.enemyProjectiles.add(new EnemyProjectile(
+            this, enemy.x, enemy.y, this.player.x, this.player.y,
+          ))
+        })
       }
     }
 
@@ -208,6 +212,22 @@ export class GameScene extends Phaser.Scene {
       .on('pointerdown', onClick)
   }
 
+  private damagePlayer(amount: number) {
+    if (this.state !== 'COMBAT' || !this.player.takeDamage(amount)) return
+    this.updatePlayerUI()
+    if (this.player.isAlive()) return
+
+    this.state = 'GAME_OVER'
+    this.stopCombat()
+    this.waveText.setVisible(false)
+    for (const enemy of this.enemies.getChildren()) {
+      if (enemy instanceof Enemy && enemy.active) enemy.setVelocity(0, 0)
+    }
+    this.add.text(400, 300, 'GAME OVER', {
+      fontSize: '48px', color: '#ffffff',
+    }).setOrigin(0.5).setDepth(1)
+  }
+
   private updatePlayerUI() {
     this.healthText.setText(`HP: ${this.player.getHealth()} / ${this.player.getMaxHealth()}`)
     const lines: string[] = []
@@ -224,9 +244,10 @@ export class GameScene extends Phaser.Scene {
     this.player.startWave()
     this.updatePlayerUI()
     this.currentWave = wave
-    // Temporary Wave 2 composition for testing Runner.
-    const composition: EnemyType[] = ['basic', 'basic', 'basic', 'basic', 'basic']
-    if (wave === 2) composition.push('runner', 'runner')
+    // Temporary Wave 2 composition for testing all three enemy types.
+    const composition: EnemyType[] = wave === 1
+      ? ['basic', 'basic', 'basic', 'basic', 'basic']
+      : ['basic', 'basic', 'basic', 'runner', 'runner', 'shooter', 'shooter']
     this.spawnWave(composition)
     this.lastShotTime = this.time.now
     this.state = 'COMBAT'
@@ -241,6 +262,7 @@ export class GameScene extends Phaser.Scene {
   private stopCombat() {
     this.player.setVelocity(0, 0)
     this.projectiles.clear(true, true)
+    this.enemyProjectiles.clear(true, true)
     for (const enemy of this.enemies.getChildren()) {
       if (enemy instanceof Enemy) enemy.clearBurn()
     }

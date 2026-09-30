@@ -7,6 +7,8 @@ class Sprite {
   constructor(scene,x,y,texture) { Object.assign(this,{scene,x,y,texture,active:true}) }
   setDisplaySize() {}
   setImmovable() {}
+  setCollideWorldBounds() {}
+  preUpdate() {}
   setVelocity(x,y) { this.velocity={x,y}; this.body={velocity:this.velocity} }
   destroy() { this.active=false }
 }
@@ -26,6 +28,7 @@ function load(path,name) {
 }
 const Enemy=load('entities/Enemy','Enemy');modules['../entities/Enemy']={Enemy}
 const Projectile=load('entities/Projectile','Projectile');modules['../entities/Projectile']={Projectile}
+const EnemyProjectile=load('entities/EnemyProjectile','EnemyProjectile');modules['../entities/EnemyProjectile']={EnemyProjectile}
 const GameScene=load('scenes/GameScene','GameScene')
 const scene=()=>({time:{now:0},add:{existing(){}},physics:{add:{existing(){}}}})
 const shot=(s,abilities={})=>new Projectile(s,0,0,100,0,{piercing:false,ricochet:false,flame:false,...abilities})
@@ -160,7 +163,7 @@ test('Runner dies from 1.5 direct damage; Flame stops on death and projectile in
  p.hit(basic,1);p.finishHit();assert.equal(p.active,false)
  assert.equal(basic.health,2);assert.equal(basic.burnTicksRemaining,4)
 })
-test('actual wave start creates five Basics then five Basics plus two Runners using safe spawn',()=>{
+test('actual wave start creates Basic wave then mixed Basic Runner Shooter wave using safe spawn',()=>{
  for(const wave of [1,2]) {
   const s=new GameScene(),items=[]
   Object.assign(s,{
@@ -170,8 +173,9 @@ test('actual wave start creates five Basics then five Basics plus two Runners us
    time:{now:0,delayedCall(){}},waveText:{setText(){return this},setVisible(){return this}},
   })
   s.startWave(wave)
-  assert.equal(items.filter(e=>e.texture==='enemy').length,5)
+  assert.equal(items.filter(e=>e.texture==='enemy').length,wave===1?5:3)
   assert.equal(items.filter(e=>e.texture==='runner').length,wave===1?0:2)
+  assert.equal(items.filter(e=>e.texture==='shooter').length,wave===1?0:2)
   for(const [i,e] of items.entries()) {
    assert.ok(e.x>=20&&e.x<=780&&e.y>=20&&e.y<=580)
    assert.ok(Math.hypot(e.x-400,e.y-300)>=280)
@@ -207,4 +211,41 @@ test('Flame kills a 1.5 HP Runner after two burn ticks and cancels remaining tic
  runner.updateBurn(1000);assert.equal(runner.health,0);assert.equal(runner.active,false)
  assert.equal(runner.burnTicksRemaining,0)
  runner.updateBurn(5000);assert.equal(runner.health,0)
+})
+
+test('Shooter range hysteresis, stats, cooldown and death',()=>{
+ const s=scene(),e=new Enemy(s,0,0,'shooter');let shots=0;const fire=()=>shots++
+ assert.equal(e.health,2);assert.equal(e.contactDamage,1)
+ e.updateBehavior(350,0,fire);assert.equal(e.velocity.x,70)
+ e.updateBehavior(295,0,fire);assert.equal(e.velocity.x,70)
+ e.updateBehavior(280,0,fire);assert.equal(e.velocity.x,0)
+ s.time.now=1499;e.updateBehavior(250,0,fire);assert.equal(shots,0)
+ s.time.now=1500;e.updateBehavior(250,0,fire);assert.equal(shots,1)
+ s.time.now=2999;e.updateBehavior(250,0,fire);assert.equal(shots,1)
+ s.time.now=3000;e.updateBehavior(250,0,fire);assert.equal(shots,2)
+ e.updateBehavior(190,0,fire);assert.equal(e.velocity.x,-70)
+ e.updateBehavior(205,0,fire);assert.equal(e.velocity.x,-70)
+ e.updateBehavior(220,0,fire);assert.equal(e.velocity.x,0)
+ e.updateBehavior(0,0,fire);assert.ok(Number.isFinite(e.velocity.x));assert.equal(Math.hypot(e.velocity.x,e.velocity.y),70)
+ e.applyBurn();e.takeDamage(2);e.updateBurn(9000);s.time.now=9000;e.updateBehavior(250,0,fire)
+ assert.equal(shots,2);assert.equal(e.burnTicksRemaining,0)
+})
+test('EnemyProjectile keeps a straight 250 px/s trajectory and exits completely before cleanup',()=>{
+ const s=scene();s.physics.world={bounds:{left:0,right:800,top:0,bottom:600}}
+ const p=new EnemyProjectile(s,400,300,700,300);p.displayWidth=12;p.displayHeight=12
+ assert.equal(p.damage,1);assert.equal(p.velocity.x,250);assert.equal(p.velocity.y,0)
+ p.preUpdate(100,100);assert.equal(p.velocity.x,250);assert.equal(p.velocity.y,0)
+ p.x=805;p.preUpdate(200,100);assert.equal(p.active,true)
+ p.x=807;p.preUpdate(300,100);assert.equal(p.active,false)
+})
+test('shared damage coordinator delegates to Player, updates UI, respects survival and stops combat on death',()=>{
+ const s=new GameScene();let calls=0,ui=0,stopped=0,alive=true,accepted=true
+ s.state='COMBAT';s.player={takeDamage:amount=>{assert.equal(amount,1);calls++;return accepted},isAlive:()=>alive}
+ s.updatePlayerUI=()=>ui++;s.stopCombat=()=>stopped++
+ s.waveText={setVisible(){}};s.enemies={getChildren:()=>[]}
+ s.add={text:()=>({setOrigin(){return this},setDepth(){return this}})}
+ s.damagePlayer(1);assert.equal(s.state,'COMBAT');assert.equal(ui,1)
+ accepted=false;s.damagePlayer(1);assert.equal(ui,1)
+ accepted=true;alive=false;s.damagePlayer(1);assert.equal(s.state,'GAME_OVER');assert.equal(stopped,1)
+ s.damagePlayer(1);assert.equal(calls,3)
 })
