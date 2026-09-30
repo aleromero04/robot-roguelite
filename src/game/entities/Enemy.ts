@@ -2,6 +2,14 @@ import Phaser from 'phaser'
 
 export type EnemyType = 'basic' | 'runner' | 'shooter'
 
+export interface EnemyStats {
+  health: number
+  speed: number
+  contactDamage: number
+  texture: string
+  size?: number
+}
+
 const ENEMY_STATS = {
   basic: { health: 3, speed: 90, contactDamage: 1, texture: 'enemy' },
   runner: { health: 1.5, speed: 160, contactDamage: 1, texture: 'runner' },
@@ -25,10 +33,10 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   private burnTicksRemaining = 0
   private nextBurnTick = 0
 
-  constructor(scene: Phaser.Scene, x: number, y: number, type: EnemyType = 'basic') {
-    const stats = ENEMY_STATS[type]
+  constructor(scene: Phaser.Scene, x: number, y: number, type: EnemyType | EnemyStats = 'basic') {
+    const stats: EnemyStats = typeof type === 'string' ? ENEMY_STATS[type] : type
     super(scene, x, y, stats.texture)
-    this.enemyType = type
+    this.enemyType = typeof type === 'string' ? type : 'basic'
     this.nextShotTime = scene.time.now + this.shotCooldown
     this.health = stats.health
     this.speed = stats.speed
@@ -37,7 +45,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     scene.add.existing(this)
     scene.physics.add.existing(this)
 
-    this.setDisplaySize(40, 40)
+    this.setDisplaySize(stats.size ?? 40, stats.size ?? 40)
     this.setImmovable(true)
     if (type === 'shooter') this.setCollideWorldBounds(true)
   }

@@ -1,5 +1,6 @@
 import Phaser from 'phaser'
 import { Player } from '../entities/Player'
+import { Boss } from '../entities/Boss'
 import { Enemy } from '../entities/Enemy'
 import type { EnemyType } from '../entities/Enemy'
 import { EnemyProjectile } from '../entities/EnemyProjectile'
@@ -8,7 +9,7 @@ import { generateUpgradeOptions } from '../data/upgrades'
 import { WAVES } from '../data/waves'
 import type { WaveNumber } from '../data/waves'
 
-type GameState = 'START' | 'COMBAT' | 'UPGRADE_SELECTION' | 'COUNTDOWN' | 'WAVE_COMPLETE' | 'GAME_OVER' | 'BOSS_INCOMING'
+type GameState = 'START' | 'COMBAT' | 'UPGRADE_SELECTION' | 'COUNTDOWN' | 'WAVE_COMPLETE' | 'GAME_OVER' | 'VICTORY'
 
 export class GameScene extends Phaser.Scene {
   private player!: Player
@@ -20,7 +21,7 @@ export class GameScene extends Phaser.Scene {
   private abilityText!: Phaser.GameObjects.Text
   private waveText!: Phaser.GameObjects.Text
   private state: GameState = 'START'
-  private currentWave: WaveNumber = 1
+  private currentWave: WaveNumber | 7 = 1
   private nextGroupIndex = 0
 
   constructor() {
@@ -28,42 +29,52 @@ export class GameScene extends Phaser.Scene {
   }
 
   create() {
+    this.state = 'START'
+    this.currentWave = 1
+    this.nextGroupIndex = 0
+    this.lastShotTime = 0
     this.cameras.main.setBackgroundColor('#151922')
 
     const graphics = this.make.graphics({ x: 0, y: 0 }, false)
     graphics.fillStyle(0x4ade80)
     graphics.fillRect(0, 0, 40, 40)
-    graphics.generateTexture('player', 40, 40)
+    if (!this.textures.exists('player')) graphics.generateTexture('player', 40, 40)
     graphics.destroy()
 
     const enemyGraphics = this.make.graphics({ x: 0, y: 0 }, false)
     enemyGraphics.fillStyle(0xef4444)
     enemyGraphics.fillRect(0, 0, 40, 40)
-    enemyGraphics.generateTexture('enemy', 40, 40)
+    if (!this.textures.exists('enemy')) enemyGraphics.generateTexture('enemy', 40, 40)
     enemyGraphics.destroy()
 
     const runnerGraphics = this.make.graphics({ x: 0, y: 0 }, false)
     runnerGraphics.fillStyle(0x22d3ee)
     runnerGraphics.fillRect(0, 0, 40, 40)
-    runnerGraphics.generateTexture('runner', 40, 40)
+    if (!this.textures.exists('runner')) runnerGraphics.generateTexture('runner', 40, 40)
     runnerGraphics.destroy()
 
     const shooterGraphics = this.make.graphics({ x: 0, y: 0 }, false)
     shooterGraphics.fillStyle(0xa855f7)
     shooterGraphics.fillRect(0, 0, 40, 40)
-    shooterGraphics.generateTexture('shooter', 40, 40)
+    if (!this.textures.exists('shooter')) shooterGraphics.generateTexture('shooter', 40, 40)
     shooterGraphics.destroy()
+
+    const bossGraphics = this.make.graphics({ x: 0, y: 0 }, false)
+    bossGraphics.fillStyle(0xf472b6)
+    bossGraphics.fillRect(0, 0, 80, 80)
+    if (!this.textures.exists('boss')) bossGraphics.generateTexture('boss', 80, 80)
+    bossGraphics.destroy()
 
     const enemyShotGraphics = this.make.graphics({ x: 0, y: 0 }, false)
     enemyShotGraphics.fillStyle(0xf97316)
     enemyShotGraphics.fillCircle(6, 6, 6)
-    enemyShotGraphics.generateTexture('enemy-projectile', 12, 12)
+    if (!this.textures.exists('enemy-projectile')) enemyShotGraphics.generateTexture('enemy-projectile', 12, 12)
     enemyShotGraphics.destroy()
 
     const projectileGraphics = this.make.graphics({ x: 0, y: 0 }, false)
     projectileGraphics.fillStyle(0xfacc15)
     projectileGraphics.fillCircle(5, 5, 5)
-    projectileGraphics.generateTexture('projectile', 10, 10)
+    if (!this.textures.exists('projectile')) projectileGraphics.generateTexture('projectile', 10, 10)
     projectileGraphics.destroy()
 
     this.physics.world.setBounds(0, 0, 800, 600)
@@ -119,11 +130,12 @@ export class GameScene extends Phaser.Scene {
     }
 
     const alive = this.enemies.countActive(true)
-    const nextGroup = WAVES[this.currentWave].groups[this.nextGroupIndex]
+    const nextGroup = this.currentWave === 7 ? undefined : WAVES[this.currentWave].groups[this.nextGroupIndex]
     if (nextGroup && nextGroup.spawnAtAlive !== null && alive <= nextGroup.spawnAtAlive) {
       this.spawnNextGroup()
     } else if (!nextGroup && alive === 0) {
-      this.completeWave()
+      if (this.currentWave === 7) this.showVictory()
+      else this.completeWave()
       return
     }
 
@@ -233,6 +245,22 @@ export class GameScene extends Phaser.Scene {
     this.add.text(400, 300, 'GAME OVER', {
       fontSize: '48px', color: '#ffffff',
     }).setOrigin(0.5).setDepth(1)
+    this.showPlayAgain()
+  }
+
+  private showVictory() {
+    this.state = 'VICTORY'
+    this.stopCombat()
+    this.waveText.setText('VICTORY').setVisible(true)
+    this.showPlayAgain()
+  }
+
+  private showPlayAgain() {
+    this.createButton(400, 400, 'PLAY AGAIN', () => {
+      if (this.state !== 'VICTORY' && this.state !== 'GAME_OVER') return
+      this.state = 'START'
+      this.scene.restart()
+    })
   }
 
   private updatePlayerUI() {
@@ -247,12 +275,27 @@ export class GameScene extends Phaser.Scene {
     this.abilityText.setText(lines.join('\n'))
   }
 
-  private startWave(wave: WaveNumber) {
+  private startWave(wave: WaveNumber | 7) {
     this.player.startWave()
     this.updatePlayerUI()
     this.currentWave = wave
     this.nextGroupIndex = 0
-    this.spawnNextGroup()
+    if (wave === 7) {
+      this.stopCombat()
+      this.enemies.clear(true, true)
+      const bounds = this.physics.world.bounds
+      const corners = [
+        { x: bounds.left + 40, y: bounds.top + 40 },
+        { x: bounds.right - 40, y: bounds.top + 40 },
+        { x: bounds.left + 40, y: bounds.bottom - 40 },
+        { x: bounds.right - 40, y: bounds.bottom - 40 },
+      ]
+      corners.sort((a, b) => Phaser.Math.Distance.BetweenPointsSquared(b, this.player) -
+        Phaser.Math.Distance.BetweenPointsSquared(a, this.player))
+      this.enemies.add(new Boss(this, corners[0].x, corners[0].y))
+    } else {
+      this.spawnNextGroup()
+    }
     this.lastShotTime = this.time.now
     this.state = 'COMBAT'
     this.waveText.setText(`WAVE ${wave}`).setVisible(true)
@@ -284,6 +327,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private showUpgradeSelection() {
+    if (this.currentWave === 7) return
     this.state = 'UPGRADE_SELECTION'
     const options = generateUpgradeOptions(
       this.currentWave,
@@ -315,8 +359,7 @@ export class GameScene extends Phaser.Scene {
       if (this.state !== 'COUNTDOWN' || !this.player.isAlive()) return
       if (index === steps.length) {
         if (this.currentWave === 6) {
-          this.state = 'BOSS_INCOMING'
-          this.waveText.setText('BOSS INCOMING').setVisible(true)
+          this.startWave(7)
         } else {
           this.startWave((this.currentWave + 1) as WaveNumber)
         }
@@ -329,6 +372,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnNextGroup() {
+    if (this.currentWave === 7) return
     const group = WAVES[this.currentWave].groups[this.nextGroupIndex]
     if (!group) return
     const composition: EnemyType[] = []

@@ -6,6 +6,7 @@ import ts from 'typescript'
 class Sprite {
   constructor(scene,x,y,texture) { Object.assign(this,{scene,x,y,texture,active:true}) }
   setDisplaySize() {}
+  setVisible() {return this}
   setImmovable() {}
   setCollideWorldBounds() {}
   preUpdate() {}
@@ -26,11 +27,13 @@ function load(path,name) {
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(`src/game/${path}.ts`,'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,context)
   return context.exports[name]
 }
-const Enemy=load('entities/Enemy','Enemy');modules['../entities/Enemy']={Enemy}
+const Enemy=load('entities/Enemy','Enemy');modules['../entities/Enemy']={Enemy};modules['./Enemy']={Enemy}
+const Boss=load('entities/Boss','Boss');modules['../entities/Boss']={Boss}
 const Projectile=load('entities/Projectile','Projectile');modules['../entities/Projectile']={Projectile}
 const EnemyProjectile=load('entities/EnemyProjectile','EnemyProjectile');modules['../entities/EnemyProjectile']={EnemyProjectile}
 const WAVES=load('data/waves','WAVES');modules['../data/waves']={WAVES}
 modules['../data/upgrades']={}
+modules['../entities/Player']={Player:load('entities/Player','Player')}
 const GameScene=load('scenes/GameScene','GameScene')
 const scene=()=>({time:{now:0},add:{existing(){}},physics:{add:{existing(){}}}})
 const shot=(s,abilities={})=>new Projectile(s,0,0,100,0,{piercing:false,ricochet:false,flame:false,...abilities})
@@ -246,7 +249,7 @@ test('EnemyProjectile keeps a straight 250 px/s trajectory and exits completely 
 test('shared damage coordinator delegates to Player, updates UI, respects survival and stops combat on death',()=>{
  const s=new GameScene();let calls=0,ui=0,stopped=0,alive=true,accepted=true
  s.state='COMBAT';s.player={takeDamage:amount=>{assert.equal(amount,1);calls++;return accepted},isAlive:()=>alive}
- s.updatePlayerUI=()=>ui++;s.stopCombat=()=>stopped++
+ s.updatePlayerUI=()=>ui++;s.stopCombat=()=>stopped++;s.showPlayAgain=()=>{}
  s.waveText={setVisible(){}};s.enemies={getChildren:()=>[]}
  s.add={text:()=>({setOrigin(){return this},setDepth(){return this}})}
  s.damagePlayer(1);assert.equal(s.state,'COMBAT');assert.equal(ui,1)
@@ -264,7 +267,7 @@ function waveFixture() {
   add:{existing(){},text},physics:{add:{existing(){}},world:{bounds:{left:0,right:800,top:0,bottom:600}}},
   input:{keyboard:{createCursorKeys:()=>({}),addKeys:()=>({})}},
   time:{now:0,delayedCall:(delay,cb)=>timers.push({at:s.time.now+delay,cb})},
-  enemies:{getChildren:()=>items,add:e=>{e.updateBehavior=()=>{};items.push(e)},countActive:()=>items.filter(e=>e.active).length},
+  enemies:{getChildren:()=>items,clear(){items.forEach(e=>e.destroy());items.length=0},add:e=>{e.updateBehavior=()=>{};items.push(e)},countActive:()=>items.filter(e=>e.active).length},
   projectiles:{clear(){this.cleared=true}},enemyProjectiles:{clear(){this.cleared=true}},
   healthText:text(),abilityText:text(),waveText:text(),
  })
@@ -313,7 +316,7 @@ test('zero survivors still spawns pending groups before completing a wave',()=>{
   f.killTo(0);f.s.update(0);assert.equal(f.s.state,'WAVE_COMPLETE')
  }
 })
-test('full six-wave flow: six choices, correct rarity wave, cleanup, shield recharge, no revive reset, boss stop',()=>{
+test('full six-wave flow: six choices, correct rarity wave, cleanup, shield recharge, no revive reset, boss start',()=>{
  const f=waveFixture();f.s.player.applyUpgrade('energy-shield');f.s.player.applyUpgrade('revive')
  f.s.startWave(1)
  for(let wave=1;wave<=6;wave++) {
@@ -332,16 +335,16 @@ test('full six-wave flow: six choices, correct rarity wave, cleanup, shield rech
   while(f.s.state==='COUNTDOWN')f.tick()
  }
  assert.deepEqual(f.upgradeWaves,[1,2,3,4,5,6])
- assert.equal(f.s.state,'BOSS_INCOMING');assert.equal(f.s.waveText.value,'BOSS INCOMING')
- assert.equal(f.s.player.isShieldReady(),false);assert.equal(f.items.filter(e=>e.active).length,0)
- assert.equal(f.items.length,58)
+ assert.equal(f.s.state,'COMBAT');assert.equal(f.s.currentWave,7)
+ assert.equal(f.s.player.isShieldReady(),true);assert.equal(f.s.player.isReviveReady(),false)
+ assert.equal(f.items.length,1);assert.ok(f.items[0] instanceof Boss);assert.equal(f.items[0].health,40)
 })
 test('Game Over prevents pending groups and any later transition',()=>{
  const f=waveFixture();f.s.startWave(6);f.killTo(2);f.s.damagePlayer(100)
  assert.equal(f.s.state,'GAME_OVER');f.s.update(1000)
  while(f.timers.length)f.tick()
  assert.equal(f.items.length,8);assert.equal(f.s.nextGroupIndex,1)
- assert.equal(f.s.state,'GAME_OVER');assert.equal(f.cards.length,0)
+ assert.equal(f.s.state,'GAME_OVER');assert.equal(f.cards.length,1);assert.equal(f.upgradeWaves.length,0)
 })
 
 
@@ -367,4 +370,74 @@ test('missing or already-hit bounce target uses only Piercing and cannot cause r
  assert.equal(p.hit(a,1),false);assert.equal(a.health,2)
  const b=new Enemy(s,30,0);p.hit(b,1);p.finishHit()
  assert.equal(p.active,false)
+})
+
+test('Boss normal speed, fixed charge vector, duration and special recovery',()=>{
+ const s=scene(),boss=new Boss(s,100,100);let shots=0
+ assert.equal(boss.health,40);assert.equal(boss.contactDamage,2)
+ boss.updateBehavior(200,100,()=>shots++);assert.equal(boss.velocity.x,75)
+ const random=phaser.Math.Between;phaser.Math.Between=()=>0
+ try {
+  s.time.now=4000;boss.updateBehavior(200,100,()=>shots++);assert.equal(boss.velocity.x,230)
+  s.time.now=4500;boss.updateBehavior(100,200,()=>shots++);assert.equal(boss.velocity.x,230);assert.equal(boss.velocity.y,0)
+  s.time.now=5200;boss.updateBehavior(100,200,()=>shots++);assert.equal(boss.phase,'NORMAL');assert.equal(boss.velocity.y,75)
+  assert.equal(boss.nextSpecial,9200);assert.equal(shots,0)
+ } finally {phaser.Math.Between=random}
+})
+test('Boss shoot fires at 0/200/400 with fresh aim, no fire after death and shared burn',()=>{
+ const s=scene(),boss=new Boss(s,100,100),shots=[]
+ const random=phaser.Math.Between;phaser.Math.Between=()=>1
+ try {
+  for(const [now,x,y] of [[4000,200,100],[4199,100,200],[4200,100,200],[4400,0,100]]) {
+   s.time.now=now;boss.updateBehavior(x,y,()=>shots.push(new EnemyProjectile(s,boss.x,boss.y,x,y)))
+  }
+  assert.equal(shots.length,3);assert.equal(shots[0].velocity.x,250);assert.equal(shots[1].velocity.y,250);assert.equal(shots[2].velocity.x,-250)
+  assert.equal(boss.phase,'NORMAL');assert.equal(boss.nextSpecial,8400)
+  boss.applyBurn();boss.updateBurn(4900);assert.equal(boss.health,39.75)
+  boss.takeDamage(40);assert.equal(boss.burnTicksRemaining,0)
+  s.time.now=10000;boss.updateBehavior(0,0,()=>shots.push(null));assert.equal(shots.length,3)
+ } finally {phaser.Math.Between=random}
+})
+test('boss spawn, victory cleanup, no upgrade and PLAY AGAIN requests scene restart once',()=>{
+ const f=waveFixture();f.s.startWave(7)
+ const boss=f.items[0]
+ assert.ok(Math.hypot(boss.x-f.s.player.x,boss.y-f.s.player.y)>=400)
+ assert.ok(boss.x>=40&&boss.x<=760&&boss.y>=40&&boss.y<=560)
+ boss.takeDamage(40);f.s.update(0)
+ assert.equal(f.s.state,'VICTORY');assert.equal(f.s.projectiles.cleared,true);assert.equal(f.s.enemyProjectiles.cleared,true)
+ assert.equal(f.s.waveText.value,'VICTORY')
+ while(f.timers.length)f.tick()
+ assert.equal(f.upgradeWaves.length,0)
+ let restarts=0;f.s.scene={restart:()=>restarts++}
+ f.cards.at(-1).click();f.cards.at(-1).click();assert.equal(restarts,1);assert.equal(f.s.state,'START')
+})
+
+test('create after restart resets run fields and creates a fresh Player and empty groups',()=>{
+ const f=waveFixture(),s=f.s
+ s.player.applyUpgrade('power-trio');s.player.applyUpgrade('revive');s.player.applyUpgrade('energy-shield')
+ const oldPlayer=s.player;s.currentWave=7;s.nextGroupIndex=3;s.lastShotTime=9000;s.state='VICTORY'
+ s.cameras={main:{setBackgroundColor(){}}}
+ s.physics.world.setBounds=()=>{};s.physics.add.overlap=()=>{}
+ const textures=new Set();s.textures={exists:key=>textures.has(key)}
+ s.make={graphics:()=>({fillStyle(){},fillRect(){},fillCircle(){},generateTexture(key){assert.equal(textures.has(key),false);textures.add(key)},destroy(){}})}
+ s.add.group=()=>({getChildren:()=>[],countActive:()=>0})
+ for(let i=0;i<2;i++) {
+  s.create()
+  assert.notEqual(s.player,oldPlayer);assert.equal(s.state,'START');assert.equal(s.currentWave,1);assert.equal(s.nextGroupIndex,0);assert.equal(s.lastShotTime,0)
+  assert.equal(s.player.getHealth(),5);assert.equal(s.player.getMaxHealth(),5);assert.equal(s.player.getSelectedUpgradeIds().length,0)
+  assert.equal(s.player.getDamage(),1);assert.equal(s.player.getAttackCooldown(),500);assert.equal(s.player.getMoveSpeed(),220)
+  assert.equal(s.player.isReviveReady(),false);assert.equal(s.player.isShieldReady(),false)
+  assert.equal(s.enemies.countActive(),0);assert.equal(s.enemyProjectiles.countActive(),0);assert.equal(s.projectiles.countActive(),0)
+ }
+})
+test('boss contact blocks full 2 damage with Shield, revives once, then Game Over stops boss',()=>{
+ const f=waveFixture();f.s.player.applyUpgrade('energy-shield');f.s.player.applyUpgrade('revive');f.s.startWave(7)
+ f.s.damagePlayer(2);assert.equal(f.s.player.getHealth(),5);assert.equal(f.s.player.isShieldReady(),false)
+ for(const time of [1000,2000,3000]){f.s.time.now=time;f.s.damagePlayer(2)}
+ assert.equal(f.s.player.getHealth(),3);assert.equal(f.s.state,'COMBAT');assert.equal(f.s.player.isReviveReady(),false)
+ f.s.damagePlayer(2);assert.equal(f.s.player.getHealth(),3)
+ for(const time of [4000,5000]){f.s.time.now=time;f.s.damagePlayer(2)}
+ assert.equal(f.s.state,'GAME_OVER');assert.equal(f.items[0].velocity.x,0)
+ assert.equal(f.s.enemyProjectiles.cleared,true)
+ f.s.update(10000);assert.equal(f.s.state,'GAME_OVER')
 })
