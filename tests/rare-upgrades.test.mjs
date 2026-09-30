@@ -29,6 +29,8 @@ function load(path,name) {
 const Enemy=load('entities/Enemy','Enemy');modules['../entities/Enemy']={Enemy}
 const Projectile=load('entities/Projectile','Projectile');modules['../entities/Projectile']={Projectile}
 const EnemyProjectile=load('entities/EnemyProjectile','EnemyProjectile');modules['../entities/EnemyProjectile']={EnemyProjectile}
+const WAVES=load('data/waves','WAVES');modules['../data/waves']={WAVES}
+modules['../data/upgrades']={}
 const GameScene=load('scenes/GameScene','GameScene')
 const scene=()=>({time:{now:0},add:{existing(){}},physics:{add:{existing(){}}}})
 const shot=(s,abilities={})=>new Projectile(s,0,0,100,0,{piercing:false,ricochet:false,flame:false,...abilities})
@@ -43,7 +45,10 @@ test('ricochet alone and with piercing redirects only once, excludes repeat hits
  for(const piercing of [false,true]) {
   const s=scene(),p=shot(s,{piercing,ricochet:true}),a=new Enemy(s,20,0),b=new Enemy(s,0,50)
   p.hit(a,1);p.finishHit(b);assert.equal(p.velocity.y,500);assert.equal(p.canRicochet(),false)
-  assert.equal(p.hit(a,1),false);p.hit(b,1);p.finishHit(a);assert.equal(p.active,false)
+  assert.equal(p.hit(a,1),false);p.hit(b,1);p.finishHit(a);assert.equal(p.active,piercing)
+  if(piercing) {
+   const c=new Enemy(s,0,100);p.hit(c,1);p.finishHit();assert.equal(p.active,false)
+  }
  }
  const s=scene(),p=shot(s,{ricochet:true});p.hit(new Enemy(s,20,0),1);p.finishHit();assert.equal(p.active,false)
 })
@@ -64,7 +69,7 @@ test('flame adds burn to direct damage and repeated overlap does not refresh',()
 })
 function combat() {
  const s=new GameScene(),enemies=[new Enemy(scene(),100,0),new Enemy(scene(),200,0)],shots=[],timers=[]
- Object.assign(s,{state:'COMBAT',currentWave:1,time:{now:500,delayedCall:(delay,cb)=>timers.push({delay,cb})},add:{existing(){}},physics:{add:{existing(){}}},enemies:{getChildren:()=>enemies,countActive:()=>enemies.filter(e=>e.active).length},projectiles:{add:p=>shots.push(p)}})
+ Object.assign(s,{state:'COMBAT',currentWave:1,nextGroupIndex:1,time:{now:500,delayedCall:(delay,cb)=>timers.push({delay,cb})},add:{existing(){}},physics:{add:{existing(){}}},enemies:{getChildren:()=>enemies,countActive:()=>enemies.filter(e=>e.active).length},projectiles:{add:p=>shots.push(p)}})
  let moving=false
  s.player={x:0,y:0,isAlive:()=>true,update(){},isMoving:()=>moving,getAttackCooldown:()=>500/1.15,getBurstSize:()=>2,hasUpgrade:()=>true}
  enemies.forEach(e=>{e.chase=()=>{}})
@@ -160,10 +165,10 @@ test('Runner dies from 1.5 direct damage; Flame stops on death and projectile in
  runner.updateBurn(5000);assert.equal(runner.health,0)
  p.finishHit(basic);p.updateHoming(16)
  assert.equal(p.homingTarget,basic);assert.equal(p.hit(runner,1),false)
- p.hit(basic,1);p.finishHit();assert.equal(p.active,false)
+ p.hit(basic,1);p.finishHit();assert.equal(p.active,true)
  assert.equal(basic.health,2);assert.equal(basic.burnTicksRemaining,4)
 })
-test('actual wave start creates Basic wave then mixed Basic Runner Shooter wave using safe spawn',()=>{
+test('Waves 1 and 2 each spawn their single Basic group safely',()=>{
  for(const wave of [1,2]) {
   const s=new GameScene(),items=[]
   Object.assign(s,{
@@ -173,9 +178,9 @@ test('actual wave start creates Basic wave then mixed Basic Runner Shooter wave 
    time:{now:0,delayedCall(){}},waveText:{setText(){return this},setVisible(){return this}},
   })
   s.startWave(wave)
-  assert.equal(items.filter(e=>e.texture==='enemy').length,wave===1?5:3)
-  assert.equal(items.filter(e=>e.texture==='runner').length,wave===1?0:2)
-  assert.equal(items.filter(e=>e.texture==='shooter').length,wave===1?0:2)
+  assert.equal(items.filter(e=>e.texture==='enemy').length,wave===1?5:7)
+  assert.equal(items.filter(e=>e.texture==='runner').length,0)
+  assert.equal(items.filter(e=>e.texture==='shooter').length,0)
   for(const [i,e] of items.entries()) {
    assert.ok(e.x>=20&&e.x<=780&&e.y>=20&&e.y<=580)
    assert.ok(Math.hypot(e.x-400,e.y-300)>=280)
@@ -248,4 +253,118 @@ test('shared damage coordinator delegates to Player, updates UI, respects surviv
  accepted=false;s.damagePlayer(1);assert.equal(ui,1)
  accepted=true;alive=false;s.damagePlayer(1);assert.equal(s.state,'GAME_OVER');assert.equal(stopped,1)
  s.damagePlayer(1);assert.equal(calls,3)
+})
+
+function waveFixture() {
+ const s=new GameScene(),items=[],timers=[],cards=[],upgradeWaves=[]
+ const text=()=>({setText(value){this.value=value;return this},setVisible(){return this},setOrigin(){return this},setDepth(){return this},setInteractive(){return this},on(event,click){this.click=click;cards.push(this);return this},destroy(){}})
+ phaser.Input={Keyboard:{KeyCodes:{}}}
+ const Player=load('entities/Player','Player')
+ Object.assign(s,{
+  add:{existing(){},text},physics:{add:{existing(){}},world:{bounds:{left:0,right:800,top:0,bottom:600}}},
+  input:{keyboard:{createCursorKeys:()=>({}),addKeys:()=>({})}},
+  time:{now:0,delayedCall:(delay,cb)=>timers.push({at:s.time.now+delay,cb})},
+  enemies:{getChildren:()=>items,add:e=>{e.updateBehavior=()=>{};items.push(e)},countActive:()=>items.filter(e=>e.active).length},
+  projectiles:{clear(){this.cleared=true}},enemyProjectiles:{clear(){this.cleared=true}},
+  healthText:text(),abilityText:text(),waveText:text(),
+ })
+ s.player=new Player(s,400,300);s.player.update=()=>{};s.player.isMoving=()=>true
+ const generator=load('data/upgrades','generateUpgradeOptions')
+ modules['../data/upgrades'].generateUpgradeOptions=(wave,...args)=>{upgradeWaves.push(wave);return generator(wave,...args)}
+ const tick=()=>{timers.sort((a,b)=>a.at-b.at);const t=timers.shift();assert.ok(t);s.time.now=t.at;t.cb()}
+ const killTo=n=>{const alive=items.filter(e=>e.active);alive.slice(0,Math.max(0,alive.length-n)).forEach(e=>e.takeDamage(100))}
+ return {s,items,timers,cards,upgradeWaves,tick,killTo}
+}
+test('configured group compositions and totals match all six waves',()=>{
+ assert.deepEqual(JSON.parse(JSON.stringify(Object.values(WAVES).map(w=>w.groups.map(g=>g.enemies)))),[
+  [{basic:5}],[{basic:7}],[{basic:5},{runner:2}],
+  [{basic:4,runner:1,shooter:1},{runner:1,shooter:2}],
+  [{basic:4,runner:2,shooter:1},{runner:2,shooter:1},{basic:2,shooter:1}],
+  [{basic:5,runner:2,shooter:1},{runner:3,shooter:2},{basic:3,shooter:1}],
+ ])
+})
+test('configured thresholds trigger once at the total alive boundary, never above it',()=>{
+ const thresholds={3:[4],4:[4],5:[5,4],6:[5,4]}
+ for(const wave of [3,4,5,6]) {
+  const f=waveFixture();f.s.startWave(wave)
+  assert.deepEqual(Array.from(WAVES[wave].groups.slice(1),g=>g.spawnAtAlive),thresholds[wave])
+  for(const [index,threshold] of thresholds[wave].entries()) {
+   const before=f.items.length
+   f.killTo(threshold+1);f.s.update(0);assert.equal(f.items.length,before)
+   f.killTo(threshold);f.s.update(0)
+   const added=Object.values(WAVES[wave].groups[index+1].enemies).reduce((a,b)=>a+b,0)
+   assert.equal(f.items.length,before+added)
+   assert.equal(f.s.enemies.countActive(true),threshold+added)
+   assert.equal(f.s.nextGroupIndex,index+2)
+   f.s.update(0);assert.equal(f.items.length,before+added)
+   assert.equal(f.s.state,'COMBAT')
+  }
+  f.killTo(0);f.s.update(0);assert.equal(f.s.state,'WAVE_COMPLETE')
+ }
+})
+test('zero survivors still spawns pending groups before completing a wave',()=>{
+ for(const wave of [3,4,5,6]) {
+  const f=waveFixture();f.s.startWave(wave)
+  for(let index=1;index<WAVES[wave].groups.length;index++) {
+   f.killTo(0);f.s.update(0)
+   assert.equal(f.s.nextGroupIndex,index+1);assert.equal(f.s.state,'COMBAT')
+   assert.ok(f.s.enemies.countActive(true)>0)
+  }
+  f.killTo(0);f.s.update(0);assert.equal(f.s.state,'WAVE_COMPLETE')
+ }
+})
+test('full six-wave flow: six choices, correct rarity wave, cleanup, shield recharge, no revive reset, boss stop',()=>{
+ const f=waveFixture();f.s.player.applyUpgrade('energy-shield');f.s.player.applyUpgrade('revive')
+ f.s.startWave(1)
+ for(let wave=1;wave<=6;wave++) {
+  assert.equal(f.s.currentWave,wave);assert.equal(f.s.player.isShieldReady(),true)
+  f.s.time.now+=1000;f.s.player.takeDamage(1) // Consume shield.
+  if(wave===1){f.s.time.now+=1000;f.s.player.takeDamage(100)} // Consume revive once.
+  assert.equal(f.s.player.isReviveReady(),false)
+  for(let i=0;i<WAVES[wave].groups.length;i++){f.killTo(0);f.s.update(f.s.time.now)}
+  assert.equal(f.s.state,'WAVE_COMPLETE');assert.equal(f.s.projectiles.cleared,true);assert.equal(f.s.enemyProjectiles.cleared,true)
+  while(f.s.state==='WAVE_COMPLETE')f.tick()
+  assert.equal(f.s.state,'UPGRADE_SELECTION');assert.equal(f.s.player.isShieldReady(),false)
+  const before=f.s.player.getSelectedUpgradeIds().length
+  const card=f.cards.at(-1);card.click();card.click()
+  assert.equal(f.s.player.getSelectedUpgradeIds().length,before+1)
+  assert.equal(f.s.state,'COUNTDOWN');assert.equal(f.s.player.isShieldReady(),false)
+  while(f.s.state==='COUNTDOWN')f.tick()
+ }
+ assert.deepEqual(f.upgradeWaves,[1,2,3,4,5,6])
+ assert.equal(f.s.state,'BOSS_INCOMING');assert.equal(f.s.waveText.value,'BOSS INCOMING')
+ assert.equal(f.s.player.isShieldReady(),false);assert.equal(f.items.filter(e=>e.active).length,0)
+ assert.equal(f.items.length,58)
+})
+test('Game Over prevents pending groups and any later transition',()=>{
+ const f=waveFixture();f.s.startWave(6);f.killTo(2);f.s.damagePlayer(100)
+ assert.equal(f.s.state,'GAME_OVER');f.s.update(1000)
+ while(f.timers.length)f.tick()
+ assert.equal(f.items.length,8);assert.equal(f.s.nextGroupIndex,1)
+ assert.equal(f.s.state,'GAME_OVER');assert.equal(f.cards.length,0)
+})
+
+
+test('Ricochet then Piercing preserve independent charges, Homing and Flame across three distinct hits',()=>{
+ const s=scene(),p=shot(s,{piercing:true,ricochet:true,flame:true})
+ const a=new Enemy(s,100,0),b=new Enemy(s,0,100),c=new Enemy(s,0,200)
+ p.enableHoming(a,()=>[a,b,c].find(e=>e.active&&!p.hasHit(e)))
+ assert.equal(p.hit(a,1.25),true);p.finishHit(b)
+ assert.equal(p.remainingRicochets,0);assert.equal(p.remainingPierces,1)
+ assert.equal(p.homingTarget,b);assert.equal(p.hit(a,1.25),false)
+ p.updateHoming(16)
+ assert.equal(p.hit(b,1.25),true);p.finishHit(c)
+ assert.equal(p.remainingPierces,0);assert.equal(p.active,true);assert.equal(p.canRicochet(),false)
+ assert.equal(p.hit(b,1.25),false);p.updateHoming(16);assert.equal(p.homingTarget,c)
+ assert.equal(p.hit(c,1.25),true);p.finishHit();assert.equal(p.active,false)
+ for(const e of [a,b,c]) {assert.equal(e.health,1.75);assert.equal(e.burnTicksRemaining,4)}
+ assert.equal(p.hit(a,1.25),false)
+})
+test('missing or already-hit bounce target uses only Piercing and cannot cause repeated damage',()=>{
+ const s=scene(),p=shot(s,{piercing:true,ricochet:true}),a=new Enemy(s,10,0)
+ p.hit(a,1);p.finishHit(a)
+ assert.equal(p.remainingPierces,0);assert.equal(p.remainingRicochets,1)
+ assert.equal(p.hit(a,1),false);assert.equal(a.health,2)
+ const b=new Enemy(s,30,0);p.hit(b,1);p.finishHit()
+ assert.equal(p.active,false)
 })

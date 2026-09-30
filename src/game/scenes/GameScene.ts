@@ -5,8 +5,10 @@ import type { EnemyType } from '../entities/Enemy'
 import { EnemyProjectile } from '../entities/EnemyProjectile'
 import { Projectile } from '../entities/Projectile'
 import { generateUpgradeOptions } from '../data/upgrades'
+import { WAVES } from '../data/waves'
+import type { WaveNumber } from '../data/waves'
 
-type GameState = 'START' | 'COMBAT' | 'UPGRADE_SELECTION' | 'COUNTDOWN' | 'WAVE_COMPLETE' | 'GAME_OVER'
+type GameState = 'START' | 'COMBAT' | 'UPGRADE_SELECTION' | 'COUNTDOWN' | 'WAVE_COMPLETE' | 'GAME_OVER' | 'BOSS_INCOMING'
 
 export class GameScene extends Phaser.Scene {
   private player!: Player
@@ -18,7 +20,8 @@ export class GameScene extends Phaser.Scene {
   private abilityText!: Phaser.GameObjects.Text
   private waveText!: Phaser.GameObjects.Text
   private state: GameState = 'START'
-  private currentWave: 1 | 2 = 1
+  private currentWave: WaveNumber = 1
+  private nextGroupIndex = 0
 
   constructor() {
     super('GameScene')
@@ -115,7 +118,11 @@ export class GameScene extends Phaser.Scene {
       return
     }
 
-    if (this.enemies.countActive(true) === 0) {
+    const alive = this.enemies.countActive(true)
+    const nextGroup = WAVES[this.currentWave].groups[this.nextGroupIndex]
+    if (nextGroup && nextGroup.spawnAtAlive !== null && alive <= nextGroup.spawnAtAlive) {
+      this.spawnNextGroup()
+    } else if (!nextGroup && alive === 0) {
       this.completeWave()
       return
     }
@@ -240,15 +247,12 @@ export class GameScene extends Phaser.Scene {
     this.abilityText.setText(lines.join('\n'))
   }
 
-  private startWave(wave: 1 | 2) {
+  private startWave(wave: WaveNumber) {
     this.player.startWave()
     this.updatePlayerUI()
     this.currentWave = wave
-    // Temporary Wave 2 composition for testing all three enemy types.
-    const composition: EnemyType[] = wave === 1
-      ? ['basic', 'basic', 'basic', 'basic', 'basic']
-      : ['basic', 'basic', 'basic', 'runner', 'runner', 'shooter', 'shooter']
-    this.spawnWave(composition)
+    this.nextGroupIndex = 0
+    this.spawnNextGroup()
     this.lastShotTime = this.time.now
     this.state = 'COMBAT'
     this.waveText.setText(`WAVE ${wave}`).setVisible(true)
@@ -272,13 +276,11 @@ export class GameScene extends Phaser.Scene {
     this.state = 'WAVE_COMPLETE'
     this.stopCombat()
     this.waveText.setText('WAVE COMPLETE').setVisible(true)
-    if (this.currentWave === 1) {
-      this.time.delayedCall(1000, () => {
-        if (this.state === 'WAVE_COMPLETE' && this.player.isAlive()) {
-          this.showUpgradeSelection()
-        }
-      })
-    }
+    this.time.delayedCall(1000, () => {
+      if (this.state === 'WAVE_COMPLETE' && this.player.isAlive()) {
+        this.showUpgradeSelection()
+      }
+    })
   }
 
   private showUpgradeSelection() {
@@ -312,7 +314,12 @@ export class GameScene extends Phaser.Scene {
     const showStep = (index: number) => {
       if (this.state !== 'COUNTDOWN' || !this.player.isAlive()) return
       if (index === steps.length) {
-        this.startWave(2)
+        if (this.currentWave === 6) {
+          this.state = 'BOSS_INCOMING'
+          this.waveText.setText('BOSS INCOMING').setVisible(true)
+        } else {
+          this.startWave((this.currentWave + 1) as WaveNumber)
+        }
         return
       }
       this.waveText.setText(steps[index]).setVisible(true)
@@ -321,7 +328,18 @@ export class GameScene extends Phaser.Scene {
     showStep(0)
   }
 
-  private spawnWave(composition: readonly EnemyType[]) {
+  private spawnNextGroup() {
+    const group = WAVES[this.currentWave].groups[this.nextGroupIndex]
+    if (!group) return
+    const composition: EnemyType[] = []
+    for (const type of ['basic', 'runner', 'shooter'] as const) {
+      for (let i = 0; i < (group.enemies[type] ?? 0); i++) composition.push(type)
+    }
+    this.spawnGroup(composition)
+    this.nextGroupIndex++
+  }
+
+  private spawnGroup(composition: readonly EnemyType[]) {
     const bounds = this.physics.world.bounds
     // Keep the complete 40 x 40 enemy inside the world.
     const margin = 20
@@ -334,7 +352,7 @@ export class GameScene extends Phaser.Scene {
     const isSeparated = (x: number, y: number) =>
       Phaser.Math.Distance.BetweenPointsSquared({ x, y }, this.player) >= 280 ** 2 &&
       this.enemies.getChildren().every(
-      enemy => !(enemy instanceof Enemy) ||
+      enemy => !(enemy instanceof Enemy) || !enemy.active ||
         Phaser.Math.Distance.BetweenPointsSquared({ x, y }, enemy) >= minDistance ** 2,
     )
 

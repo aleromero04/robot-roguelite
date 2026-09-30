@@ -13,7 +13,8 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
   private homingTarget?: Enemy
   private findHomingTarget?: () => Enemy | undefined
   private readonly hitEnemies = new Set<Enemy>()
-  private hasRicocheted = false
+  private remainingPierces: number
+  private remainingRicochets: number
   private readonly abilities: ProjectileAbilities
 
   constructor(
@@ -26,6 +27,8 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
   ) {
     super(scene, x, y, 'projectile')
     this.abilities = abilities
+    this.remainingPierces = abilities.piercing ? 1 : 0
+    this.remainingRicochets = abilities.ricochet ? 1 : 0
 
     scene.add.existing(this)
     scene.physics.add.existing(this)
@@ -38,7 +41,7 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
   }
 
   canRicochet(): boolean {
-    return this.abilities.ricochet && !this.hasRicocheted && this.hitEnemies.size < 2
+    return this.remainingRicochets > 0
   }
 
   hit(enemy: Enemy, damage: number): boolean {
@@ -50,16 +53,23 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
   }
 
   finishHit(ricochetTarget?: Enemy) {
-    const maxHits = this.abilities.piercing || this.abilities.ricochet ? 2 : 1
-    if (this.hitEnemies.size >= maxHits) {
-      this.destroy()
-    } else if (this.canRicochet() && ricochetTarget) {
-      this.hasRicocheted = true
+    if (!this.active) return
+    let continued = false
+
+    // A bounce consumes only Ricochet; preserve Piercing for the next impact.
+    if (this.canRicochet() && ricochetTarget?.active && !this.hasHit(ricochetTarget)) {
+      this.remainingRicochets--
       this.homingTarget = ricochetTarget
       this.aimAt(ricochetTarget.x, ricochetTarget.y)
-    } else if (!this.abilities.piercing) {
-      this.destroy()
+      continued = true
     }
+
+    if (!continued && this.remainingPierces > 0) {
+      this.remainingPierces--
+      continued = true
+    }
+
+    if (!continued) this.destroy()
   }
 
   enableHoming(target: Enemy, findTarget: () => Enemy | undefined) {
