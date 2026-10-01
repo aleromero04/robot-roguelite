@@ -1,3 +1,4 @@
+import * as effects from './combat-effects-stub.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import fs from 'node:fs'
@@ -9,6 +10,7 @@ import { createRequire } from 'node:module'
 const ArcadeBody = createRequire(import.meta.url)('../node_modules/phaser/src/physics/arcade/Body.js')
 class Sprite {
   constructor(scene,x,y,texture) { Object.assign(this,{scene,x,y,texture,active:true}) }
+  setRotation(angle) { this.rotation=angle;return this }
   setDisplaySize() {}
   setTint() { this.tinted=true;return this }
   setTintMode() { return this }
@@ -28,7 +30,9 @@ class Vector2 {
   normalize() { const n=Math.hypot(this.x,this.y);if(n){this.x/=n;this.y/=n}return this }
 }
 const phaser={Geom:{Rectangle:createRequire(import.meta.url)('../node_modules/phaser/src/geom/rectangle/Rectangle.js')},TintModes:{FILL:1},Scene:class {},Physics:{Arcade:{Sprite}},Math:{Vector2,Between:(min,max)=>Math.floor(Math.random()*(max-min+1))+min,Distance:{BetweenPointsSquared:(a,b)=>(a.x-b.x)**2+(a.y-b.y)**2}}}
-const modules={'../environment/ArenaBounds.ts':arenaBounds,'../environment/ArenaObstacles':obstacles,'../environment/ArenaVisuals':{preloadArena(){},createArena(){}},'../visuals/characters':{configureCharacter(){},CHARACTERS:{}}}
+const hud=()=>({setVisible(){},update(){}})
+const modules={'../ui/UpgradeIconFactory':{preloadUpgradeIcons(){}},'../ui/UpgradeCard':{createUpgradeCard:(scene,x,y,upgrade,choose)=>scene.add.text(x,y,upgrade.name).setInteractive().on('pointerdown',choose)},'../ui/CombatHUD':{CombatHUD:class {setVisible(){} update(){}}},'../visuals/projectiles':{configureProjectile(){},createProjectileTextures(){}},'../effects/CombatEffects':effects,'../environment/ArenaBounds.ts':arenaBounds,'../environment/ArenaObstacles':obstacles,'../environment/ArenaVisuals':{preloadArena(){},createArena(){}},'../visuals/characters':{configureCharacter(){},CHARACTERS:{}}}
+const circle=()=>({setStrokeStyle(){return this},setDepth(){return this},setPosition(){return this},setAlpha(){return this},destroy(){this.destroyed=true}})
 const graphics=()=>({clear(){},fillStyle(){},fillRect(){},setDepth(){return this}})
 function load(path,name) {
   const context={exports:{},require:id=>id==='phaser'?phaser:modules[id]??{}}
@@ -82,9 +86,9 @@ test('flame adds burn to direct damage and repeated overlap does not refresh',()
 })
 function combat() {
  const s=new GameScene(),enemies=[new Enemy(scene(),100,0),new Enemy(scene(),200,0)],shots=[],timers=[]
- Object.assign(s,{enemyHealthBars:graphics(),state:'COMBAT',currentWave:1,nextGroupIndex:1,time:{now:500,delayedCall:(delay,cb)=>timers.push({delay,cb})},add:{existing(){}},physics:{add:{existing(){}}},enemies:{getChildren:()=>enemies,countActive:()=>enemies.filter(e=>e.active).length},projectiles:{add:p=>shots.push(p)}})
+ Object.assign(s,{hud:hud(),enemyHealthBars:graphics(),state:'COMBAT',currentWave:1,nextGroupIndex:1,time:{now:500,delayedCall:(delay,cb)=>timers.push({delay,cb})},add:{existing(){}},physics:{add:{existing(){}}},enemies:{getChildren:()=>enemies,countActive:()=>enemies.filter(e=>e.active).length},projectiles:{add:p=>shots.push(p)}})
  let moving=false
- s.player={x:0,y:0,isAlive:()=>true,update(){},isMoving:()=>moving,getAttackCooldown:()=>500/1.15,getBurstSize:()=>2,hasUpgrade:()=>true}
+ s.player={setCombatVisualsVisible(){},x:0,y:0,isAlive:()=>true,update(){},isMoving:()=>moving,getAttackCooldown:()=>500/1.15,getBurstSize:()=>2,hasUpgrade:()=>true}
  enemies.forEach(e=>{e.chase=()=>{}})
  return {s,enemies,shots,timers,move:()=>{moving=true}}
 }
@@ -185,7 +189,7 @@ test('Waves 1 and 2 each spawn their single Basic group safely',()=>{
  for(const wave of [1,2]) {
   const s=new GameScene(),items=[]
   Object.assign(s,{
-   enemyHealthBars:graphics(),player:{x:400,y:300,startWave(){}},updatePlayerUI(){},
+   hud:hud(),enemyHealthBars:graphics(),player:{setCombatVisualsVisible(){},x:400,y:300,startWave(){}},updatePlayerUI(){},
    add:{existing(){}},physics:{add:{existing(){}},world:{bounds:{left:0,right:800,top:0,bottom:600}}},
    enemies:{getChildren:()=>items,add:e=>items.push(e)},
    time:{now:0,delayedCall(){}},waveText:{setText(){return this},setVisible(){return this}},
@@ -274,7 +278,7 @@ function waveFixture() {
  phaser.Input={Keyboard:{KeyCodes:{}}}
  const Player=load('entities/Player','Player')
  Object.assign(s,{
-  enemyHealthBars:graphics(),add:{existing(){},text,graphics},physics:{add:{existing(){}},world:{bounds:{left:0,right:800,top:0,bottom:600}}},
+  hud:hud(),enemyHealthBars:graphics(),add:{existing(){},text,graphics,circle},physics:{add:{existing(){}},world:{bounds:{left:0,right:800,top:0,bottom:600}}},
   input:{keyboard:{createCursorKeys:()=>({}),addKeys:()=>({})}},
   time:{now:0,delayedCall:(delay,cb)=>timers.push({at:s.time.now+delay,cb})},
   enemies:{getChildren:()=>items,clear(){items.forEach(e=>e.destroy());items.length=0},add:e=>{e.updateBehavior=()=>{};items.push(e)},countActive:()=>items.filter(e=>e.active).length},
@@ -460,7 +464,7 @@ test('boss contact blocks full 2 damage with Shield, revives once, then Game Ove
 })
 
 test('enemy damage flashes briefly and health bars follow fractional HP and disappear on death',()=>{
- const f=waveFixture(),e=new Enemy(f.s,120,140,'runner')
+ const f=waveFixture(),e=new Enemy(f.s,120,140,'runner');f.s.state='COMBAT'
  e.displayHeight=44;f.items.push(e)
  e.takeDamage(0.25)
  assert.equal(e.getMaxHealth(),1.5);assert.equal(e.getHealth(),1.25);assert.equal(e.tinted,true)
@@ -473,7 +477,7 @@ test('enemy damage flashes briefly and health bars follow fractional HP and disa
  e.x=180;f.s.drawEnemyHealthBars();assert.equal(rects[1][0],164)
  e.takeDamage(2);f.s.drawEnemyHealthBars();assert.equal(rects.length,0)
  const boss=new Boss(f.s,400,100);f.items.push(boss);boss.takeDamage(20)
- f.s.drawEnemyHealthBars();assert.deepEqual(rects[1],[280,24,120,10])
+ f.s.drawEnemyHealthBars();assert.equal(rects.length,0) // Boss now belongs to CombatHUD.
 })
 test('preload requests the five PNG textures and reuses them on restart',()=>{
  const s=new GameScene(),loaded=[]
@@ -721,4 +725,45 @@ test('both projectile types disappear at each interior wall, including upgraded 
   if(side==='bottom')p.y++
   p.preUpdate(0,0);assert.equal(p.active,false)
  }
+})
+
+test('death removes all enemy types immediately while requesting only a separate visual; burn cleans on death',()=>{
+ for(const type of ['basic','runner','shooter','boss']) {
+  const s=scene(),e=type==='boss'?new Boss(s,50,50):new Enemy(s,50,50,type)
+  e.applyBurn();const marker=effects.events.at(-1)[2]
+  const p=shot(s,{flame:true,piercing:true});p.hit(e,100)
+  assert.equal(e.active,false);assert.equal(marker.destroyed,true)
+  assert.equal(e.burnTicksRemaining,0);assert.equal(p.hit(e,100),false)
+  const hp=e.getHealth();e.updateBurn(10000);assert.equal(e.getHealth(),hp)
+  assert.ok(effects.events.some(event=>event[0]==='death'&&event[1]===e))
+ }
+})
+test('burn refresh reuses one marker, expiration/stop destroys it and ticks do not flash',()=>{
+ const s=scene(),e=new Enemy(s,50,50)
+ e.applyBurn();const marker=effects.events.at(-1)[2]
+ s.time.now=100;e.applyBurn();assert.equal(effects.events.at(-1)[2],marker)
+ const before=effects.events.filter(event=>event[0]==='damage').length
+ e.updateBurn(2100);assert.equal(e.getHealth(),2);assert.equal(marker.destroyed,true)
+ assert.equal(effects.events.filter(event=>event[0]==='damage').length,before)
+ e.applyBurn();const next=effects.events.at(-1)[2];e.clearBurn();assert.equal(next.destroyed,true)
+})
+
+test('laser orientation follows initial aim, Ricochet and Homing without changing speeds',()=>{
+ const s=scene(),p=shot(s,{ricochet:true}),e=new Enemy(s,0,100)
+ assert.equal(p.rotation,0)
+ p.finishHit(e);assert.equal(p.rotation,Math.PI/2)
+ p.enableHoming(new Enemy(s,100,100),()=>undefined);p.updateHoming(100)
+ assert.ok(Math.abs(p.rotation-Math.atan2(p.velocity.y,p.velocity.x))<1e-9)
+ assert.ok(Math.abs(Math.hypot(p.velocity.x,p.velocity.y)-500)<1e-9)
+ const hostile=new EnemyProjectile(s,0,0,0,-100)
+ assert.equal(hostile.rotation,-Math.PI/2);assert.equal(hostile.velocity.y,-250)
+})
+test('Shield field follows READY/block/new wave and is absent during transitions without changing readiness',()=>{
+ const f=waveFixture(),p=f.s.player;p.displayWidth=54;p.displayHeight=54
+ p.applyUpgrade('energy-shield');p.startWave();assert.equal(p.shieldField,undefined)
+ p.setCombatVisualsVisible(true);const field=p.shieldField;assert.ok(field)
+ p.takeDamage(1);assert.equal(p.getHealth(),5);assert.equal(field.destroyed,true);assert.equal(p.shieldField,undefined)
+ p.startWave();assert.ok(p.shieldField);assert.equal(p.isShieldReady(),true)
+ p.setCombatVisualsVisible(false);assert.equal(p.shieldField,undefined);assert.equal(p.isShieldReady(),true)
+ p.setCombatVisualsVisible(true);const next=p.shieldField;p.destroy();assert.equal(next.destroyed,true)
 })

@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { DamageFlash, shieldBlock, ReviveEffect } from '../effects/CombatEffects'
 import { configureCharacter } from '../visuals/characters'
 
 export class Player extends Phaser.Physics.Arcade.Sprite {
@@ -15,6 +16,10 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   private health = this.maxHealth
   private readonly invulnerabilityDuration = 1000
   private invulnerableUntil = 0
+  private readonly reviveEffect = new ReviveEffect()
+  private readonly damageFlash = new DamageFlash()
+  private shieldField?: Phaser.GameObjects.Arc
+  private combatVisualsVisible = false
   private shieldReady = false
   private reviveReady = false
 
@@ -35,6 +40,14 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       left: Phaser.Input.Keyboard.KeyCodes.A,
       right: Phaser.Input.Keyboard.KeyCodes.D,
     }) as Record<string, Phaser.Input.Keyboard.Key>
+  }
+
+  override preUpdate(time: number, delta: number) {
+    super.preUpdate(time, delta)
+    this.damageFlash.update(this)
+    this.reviveEffect.update(this)
+    this.shieldField?.setPosition(this.x, this.y)
+      .setAlpha(0.75 + 0.08 * Math.sin(this.scene.time.now / 300))
   }
 
   update() {
@@ -121,6 +134,31 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
   startWave() {
     this.shieldReady = this.hasUpgrade('energy-shield')
+    this.syncShieldField()
+  }
+
+  setCombatVisualsVisible(visible: boolean) {
+    this.combatVisualsVisible = visible
+    if (!visible) this.reviveEffect.clear(this)
+    this.syncShieldField()
+  }
+
+  private syncShieldField() {
+    if (!this.shieldReady || !this.combatVisualsVisible) {
+      this.shieldField?.destroy()
+      this.shieldField = undefined
+      return
+    }
+    this.shieldField ??= this.scene.add.circle(this.x, this.y,
+      Math.max(this.displayWidth, this.displayHeight) / 2 + 5, 0x39dfff, 0.07)
+      .setStrokeStyle(1.5, 0x6beaff, 0.5).setDepth(0.4)
+  }
+
+  override destroy(fromScene?: boolean) {
+    this.reviveEffect.clear(this)
+    this.shieldField?.destroy()
+    this.shieldField = undefined
+    super.destroy(fromScene)
   }
 
   isShieldReady(): boolean {
@@ -146,12 +184,17 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.invulnerableUntil = now + this.invulnerabilityDuration
     if (this.shieldReady) {
       this.shieldReady = false
+      this.syncShieldField()
+      shieldBlock(this)
       return true
     }
+
+    this.damageFlash.show(this, 100, 0xff9999)
 
     if (amount >= this.health && this.reviveReady) {
       this.reviveReady = false
       this.health = Math.min(3, this.maxHealth)
+      this.reviveEffect.start(this, this.invulnerableUntil)
       return true
     }
 

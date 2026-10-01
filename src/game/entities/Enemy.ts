@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { DamageFlash, burnMarker, death } from '../effects/CombatEffects'
 import { blocksPath, findLocalDetour } from '../environment/ArenaObstacles'
 import type { Point, Detour } from '../environment/ArenaObstacles'
 import { configureCharacter } from '../visuals/characters'
@@ -29,7 +30,9 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
   private rangeMovement: 'approach' | 'hold' | 'retreat' = 'hold'
   private health: number
   private readonly maxHealth: number
-  private flashUntil = 0
+  private readonly damageFlash = new DamageFlash()
+  private burnVisual?: ReturnType<typeof burnMarker>
+  protected bossFeedback = false
   private readonly speed: number
   readonly contactDamage: number
   private readonly lateralStrength = 0.25
@@ -151,20 +154,24 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
 
   applyBurn() {
     if (!this.active) return
+    this.burnVisual ??= burnMarker(this)
     this.burnTicksRemaining = 4
     this.nextBurnTick = this.scene.time.now + 500
   }
 
   clearBurn() {
     this.burnTicksRemaining = 0
+    this.burnVisual?.destroy()
+    this.burnVisual = undefined
   }
 
   updateBurn(time: number) {
     while (this.active && this.burnTicksRemaining > 0 && time >= this.nextBurnTick) {
       this.burnTicksRemaining--
       this.nextBurnTick += 500
-      this.takeDamage(0.25)
+      this.takeDamage(0.25, false)
     }
+    if (this.burnTicksRemaining === 0) this.clearBurn()
   }
 
   getHealth(): number { return this.health }
@@ -173,21 +180,23 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
 
   override preUpdate(time: number, delta: number) {
     super.preUpdate(time, delta)
-    if (this.flashUntil && this.scene.time.now >= this.flashUntil) {
-      this.clearTint()
-      this.flashUntil = 0
+    this.damageFlash.update(this)
+    this.burnVisual?.update()
+  }
+
+  takeDamage(amount: number, flash = true) {
+    if (!this.active || amount <= 0) return
+    this.health -= amount
+    if (flash) this.damageFlash.show(this, this.bossFeedback ? 120 : 80)
+
+    if (this.health <= 0) {
+      death(this, this.bossFeedback)
+      this.destroy()
     }
   }
 
-  takeDamage(amount: number) {
-    if (!this.active) return
-    this.health -= amount
-    this.setTint(0xffffff).setTintMode(Phaser.TintModes.FILL)
-    this.flashUntil = this.scene.time.now + 80
-
-    if (this.health <= 0) {
-      this.clearBurn()
-      this.destroy()
-    }
+  override destroy(fromScene?: boolean) {
+    this.clearBurn()
+    super.destroy(fromScene)
   }
 }

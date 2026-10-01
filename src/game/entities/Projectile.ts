@@ -1,4 +1,6 @@
+import { configureProjectile } from '../visuals/projectiles'
 import Phaser from 'phaser'
+import { impact } from '../effects/CombatEffects'
 import { PLAYABLE_BOUNDS } from '../environment/ArenaBounds.ts'
 import type { Enemy } from './Enemy'
 
@@ -33,6 +35,7 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
 
     scene.add.existing(this)
     scene.physics.add.existing(this)
+    configureProjectile(this, 10)
     this.setCollideWorldBounds(true)
 
     this.aimAt(targetX, targetY)
@@ -48,6 +51,7 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
 
   hit(enemy: Enemy, damage: number): boolean {
     if (!this.active || !enemy.active || this.hasHit(enemy)) return false
+    impact(this.scene, this.x, this.y)
     this.hitEnemies.add(enemy)
     enemy.takeDamage(damage)
     if (this.abilities.flame && enemy.active) enemy.applyBurn()
@@ -97,11 +101,13 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
     const maxTurn = this.homingTurnRate * Math.max(0, delta) / 1000
     const angle = current + Math.max(-maxTurn, Math.min(maxTurn, difference))
     this.setVelocity(Math.cos(angle) * this.speed, Math.sin(angle) * this.speed)
+    this.setRotation(angle)
   }
 
   private aimAt(targetX: number, targetY: number) {
     const direction = new Phaser.Math.Vector2(targetX - this.x, targetY - this.y).normalize()
     this.setVelocity(direction.x * this.speed, direction.y * this.speed)
+    this.setRotation(Math.atan2(direction.y, direction.x))
   }
 
   preUpdate(time: number, delta: number) {
@@ -109,8 +115,8 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
     this.updateHoming(delta)
 
     const bounds = PLAYABLE_BOUNDS
-    const halfWidth = this.displayWidth / 2
-    const halfHeight = this.displayHeight / 2
+    const halfWidth = 5
+    const halfHeight = 5
 
     // Arcade clamps at the inner wall; remove on contact, never behind it.
     if (
@@ -119,7 +125,13 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
       this.y - halfHeight <= bounds.top ||
       this.y + halfHeight >= bounds.bottom
     ) {
-      this.destroy()
+      this.impactAndDestroy()
     }
+  }
+
+  impactAndDestroy() {
+    if (!this.active) return
+    impact(this.scene, this.x, this.y)
+    this.destroy()
   }
 }

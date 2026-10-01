@@ -1,3 +1,5 @@
+import { HealthFeedback } from '../src/game/ui/HealthFeedback.ts'
+import * as effects from './combat-effects-stub.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import fs from 'node:fs'
@@ -18,7 +20,7 @@ class Sprite {
 const phaser = { TintModes: { FILL: 1 }, Physics: { Arcade: { Sprite } }, Input: { Keyboard: { KeyCodes: {} } } }
 function loadEntity(name) {
   const source = fs.readFileSync(new URL(`../src/game/entities/${name}.ts`, import.meta.url), 'utf8')
-  const context = { exports: {}, require: id => id === 'phaser' ? phaser : { configureCharacter() {} } }
+  const context = { exports: {}, require: id => id === 'phaser' ? phaser : id === '../effects/CombatEffects' ? effects : { configureCharacter() {} } }
   vm.runInNewContext(ts.transpileModule(source, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText, context)
@@ -179,4 +181,29 @@ test('Triple overrides Rapid regardless of acquisition order', () => {
   reverse.applyUpgrade('triple-shot')
   assert.equal(reverse.getBurstSize(), 3)
   assert.equal(reverse.getSelectedUpgradeIds().filter(id => id === 'triple-shot').length, 1)
+})
+
+test('Shield emits only a block effect; rejected overlaps emit none; real damage flashes without changing invulnerability',()=>{
+ const p=makePlayer();p.applyUpgrade('energy-shield');p.startWave()
+ effects.events.length=0;p.takeDamage(2)
+ assert.equal(p.getHealth(),5);assert.deepEqual(effects.events.map(e=>e[0]),['shield'])
+ p.takeDamage(2);assert.equal(effects.events.length,1)
+ p.scene.time.now=1000;p.takeDamage(2)
+ assert.equal(p.getHealth(),3);assert.deepEqual(effects.events.map(e=>e[0]),['shield','damage'])
+ p.scene.time.now=1999;p.takeDamage(1);assert.equal(p.getHealth(),3)
+ p.scene.time.now=2000;p.takeDamage(1);assert.equal(p.getHealth(),2)
+})
+
+
+test('real Player Shield and i-frames never trigger HUD health-loss feedback; damage and healing do',()=>{
+ const p=makePlayer(),feedback=new HealthFeedback()
+ feedback.update(p.getHealth(),0)
+ p.applyUpgrade('energy-shield');p.startWave();p.takeDamage(2)
+ assert.equal(feedback.update(p.getHealth(),0),undefined)
+ p.scene.time.now=999;p.takeDamage(1)
+ assert.equal(feedback.update(p.getHealth(),999),undefined)
+ p.scene.time.now=1000;p.takeDamage(1)
+ assert.equal(feedback.update(p.getHealth(),1000),0xff6578)
+ p.applyUpgrade('repair')
+ assert.equal(feedback.update(p.getHealth(),1001),0x64d98b)
 })

@@ -1,3 +1,7 @@
+import { createUpgradeCard } from '../ui/UpgradeCard'
+import { preloadUpgradeIcons } from '../ui/UpgradeIconFactory'
+import { CombatHUD } from '../ui/CombatHUD'
+import { createProjectileTextures } from '../visuals/projectiles'
 import Phaser from 'phaser'
 import { PLAYABLE_BOUNDS } from '../environment/ArenaBounds.ts'
 import { createObstacles, isSpawnClear } from '../environment/ArenaObstacles'
@@ -22,8 +26,7 @@ export class GameScene extends Phaser.Scene {
   private enemyProjectiles!: Phaser.GameObjects.Group
   private projectiles!: Phaser.GameObjects.Group
   private enemyHealthBars!: Phaser.GameObjects.Graphics
-  private healthText!: Phaser.GameObjects.Text
-  private abilityText!: Phaser.GameObjects.Text
+  private hud!: CombatHUD
   private waveText!: Phaser.GameObjects.Text
   private state: GameState = 'START'
   private currentWave: WaveNumber | 7 = 1
@@ -35,6 +38,7 @@ export class GameScene extends Phaser.Scene {
 
   preload() {
     preloadArena(this)
+    preloadUpgradeIcons(this)
     for (const key of Object.keys(CHARACTERS)) {
       if (!this.textures.exists(key)) this.load.image(key, `assets/characters/${key}.png`)
     }
@@ -55,17 +59,7 @@ export class GameScene extends Phaser.Scene {
     }
     this.enemyHealthBars = this.add.graphics().setDepth(1)
 
-    const enemyShotGraphics = this.make.graphics({ x: 0, y: 0 }, false)
-    enemyShotGraphics.fillStyle(0xf97316)
-    enemyShotGraphics.fillCircle(6, 6, 6)
-    if (!this.textures.exists('enemy-projectile')) enemyShotGraphics.generateTexture('enemy-projectile', 12, 12)
-    enemyShotGraphics.destroy()
-
-    const projectileGraphics = this.make.graphics({ x: 0, y: 0 }, false)
-    projectileGraphics.fillStyle(0xfacc15)
-    projectileGraphics.fillCircle(5, 5, 5)
-    if (!this.textures.exists('projectile')) projectileGraphics.generateTexture('projectile', 10, 10)
-    projectileGraphics.destroy()
+    createProjectileTextures(this)
 
     this.physics.world.setBounds(PLAYABLE_BOUNDS.left, PLAYABLE_BOUNDS.top,
       PLAYABLE_BOUNDS.right - PLAYABLE_BOUNDS.left, PLAYABLE_BOUNDS.bottom - PLAYABLE_BOUNDS.top)
@@ -81,17 +75,10 @@ export class GameScene extends Phaser.Scene {
     // Registered before damage overlaps: obstacle hits never trigger projectile skills.
     for (const group of [this.projectiles, this.enemyProjectiles]) {
       this.physics.add.collider(group, obstacles, projectile => {
-        if (projectile instanceof Projectile || projectile instanceof EnemyProjectile) projectile.destroy()
+        if (projectile instanceof Projectile || projectile instanceof EnemyProjectile) projectile.impactAndDestroy()
       })
     }
-    this.healthText = this.add.text(16, 16, `HP: ${this.player.getHealth()} / ${this.player.getMaxHealth()}`, {
-      fontSize: '24px',
-      color: '#ffffff',
-    }).setDepth(1)
-
-    this.abilityText = this.add.text(16, 48, '', {
-      fontSize: '18px', color: '#ffffff',
-    }).setDepth(1)
+    this.hud = new CombatHUD(this)
 
     this.waveText = this.add.text(400, 70, '', {
       fontSize: '32px',
@@ -104,7 +91,7 @@ export class GameScene extends Phaser.Scene {
     })
     this.physics.add.overlap(this.player, this.enemyProjectiles, (_player, projectile) => {
       if (this.state !== 'COMBAT' || !(projectile instanceof EnemyProjectile) || !projectile.active) return
-      projectile.destroy()
+      projectile.impactAndDestroy()
       this.damagePlayer(projectile.damage)
     })
 
@@ -127,6 +114,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(time: number) {
+    this.hud.setVisible(this.state === 'COMBAT')
+    if (this.state === 'COMBAT') this.updatePlayerUI()
     this.drawEnemyHealthBars()
     if (this.state !== 'COMBAT' || !this.player.isAlive()) {
       return
@@ -207,7 +196,6 @@ export class GameScene extends Phaser.Scene {
 
   private showStartScreen() {
     this.player.setVisible(false)
-    this.healthText.setVisible(false)
     const title = this.add.text(400, 180, 'ROBOT ROGUELITE', {
       fontSize: '40px', color: '#ffffff',
     }).setOrigin(0.5)
@@ -221,7 +209,6 @@ export class GameScene extends Phaser.Scene {
       instructions.destroy()
       play.destroy()
       this.player.setVisible(true)
-      this.healthText.setVisible(true)
       this.startWave(1)
     })
   }
@@ -236,16 +223,16 @@ export class GameScene extends Phaser.Scene {
 
   private drawEnemyHealthBars() {
     this.enemyHealthBars.clear()
+    if (this.state !== 'COMBAT') return
     for (const enemy of this.enemies.getChildren()) {
-      if (!(enemy instanceof Enemy) || !enemy.active) continue
-      const boss = enemy instanceof Boss
-      const width = boss ? 240 : 32
-      const height = boss ? 10 : 4
-      const x = boss ? 280 : enemy.x - width / 2
-      const y = boss ? 24 : Math.max(2, enemy.y - enemy.displayHeight / 2 - 9)
+      if (!(enemy instanceof Enemy) || !enemy.active || enemy instanceof Boss) continue
+      const width = 32
+      const height = 4
+      const x = enemy.x - width / 2
+      const y = Math.max(2, enemy.y - enemy.displayHeight / 2 - 9)
       this.enemyHealthBars.fillStyle(0x101827, 0.9)
       this.enemyHealthBars.fillRect(x - 1, y - 1, width + 2, height + 2)
-      this.enemyHealthBars.fillStyle(boss ? 0xf472b6 : 0x4ade80)
+      this.enemyHealthBars.fillStyle(0x4ade80)
       this.enemyHealthBars.fillRect(x, y, width * Math.max(0, enemy.getHealth() / enemy.getMaxHealth()), height)
     }
   }
@@ -283,15 +270,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private updatePlayerUI() {
-    this.healthText.setText(`HP: ${this.player.getHealth()} / ${this.player.getMaxHealth()}`)
-    const lines: string[] = []
-    if (this.player.hasUpgrade('energy-shield')) {
-      lines.push(`SHIELD: ${this.player.isShieldReady() ? 'READY' : 'USED'}`)
-    }
-    if (this.player.hasUpgrade('revive')) {
-      lines.push(`REVIVE: ${this.player.isReviveReady() ? 'READY' : 'USED'}`)
-    }
-    this.abilityText.setText(lines.join('\n'))
+    const boss = this.enemies.getChildren().find(enemy => enemy instanceof Boss && enemy.active) as Boss | undefined
+    this.hud.update(this.player, this.currentWave, boss)
   }
 
   private startWave(wave: WaveNumber | 7) {
@@ -319,6 +299,9 @@ export class GameScene extends Phaser.Scene {
     }
     this.lastShotTime = this.time.now
     this.state = 'COMBAT'
+    this.player.setCombatVisualsVisible(true)
+    this.hud.setVisible(true)
+    this.updatePlayerUI()
     this.waveText.setText(`WAVE ${wave}`).setVisible(true)
     this.time.delayedCall(1500, () => {
       if (this.state === 'COMBAT' && this.currentWave === wave) {
@@ -328,6 +311,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private stopCombat() {
+    this.hud.setVisible(false)
+    this.enemyHealthBars.clear()
+    this.player.setCombatVisualsVisible(false)
     this.player.setVelocity(0, 0)
     this.projectiles.clear(true, true)
     this.enemyProjectiles.clear(true, true)
@@ -357,13 +343,7 @@ export class GameScene extends Phaser.Scene {
       this.player.getMaxHealth(),
     )
     const cards = options.map((upgrade, index) =>
-      this.add.text(160 + index * 240, 300,
-        `${upgrade.name}\n\n${upgrade.rarity}\n\n${upgrade.description}`, {
-          fontSize: '18px', color: '#ffffff', backgroundColor: '#334155',
-          fixedWidth: 220, fixedHeight: 240,
-          padding: { x: 12, y: 16 }, wordWrap: { width: 196 }, align: 'center',
-        }).setOrigin(0.5).setDepth(2).setInteractive({ useHandCursor: true })
-        .on('pointerdown', () => {
+      createUpgradeCard(this, 160 + index * 240, 320, upgrade, () => {
           if (this.state !== 'UPGRADE_SELECTION') return
           this.state = 'COUNTDOWN'
           this.player.applyUpgrade(upgrade.id)

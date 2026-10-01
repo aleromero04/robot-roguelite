@@ -12,6 +12,7 @@ export class Boss extends Enemy {
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
     super(scene, x, y, { health: 40, speed: 75, contactDamage: 2, texture: 'enemy-boss', size: 80 })
+    this.bossFeedback = true
     this.setCollideWorldBounds(true)
     this.nextSpecial = scene.time.now + 4000
   }
