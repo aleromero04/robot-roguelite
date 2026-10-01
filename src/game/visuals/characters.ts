@@ -1,4 +1,5 @@
-import type Phaser from 'phaser'
+import Phaser from 'phaser'
+import { PLAYABLE_BOUNDS } from '../environment/ArenaBounds.ts'
 
 // Non-transparent bounds measured from the original PNGs; originals stay intact.
 export const CHARACTERS = {
@@ -33,4 +34,12 @@ export function configureCharacter(sprite: Phaser.Physics.Arcade.Sprite, hitboxS
   // must not treat the texture/scale correction as movement from the original PNG.
   body.prev.copy(body.position)
   body.prevFrame.copy(body.position)
+  // Keep the larger visual frame off the walls without enlarging the hitbox.
+  const overhangX = Math.max(0, (sprite.width * scale - hitboxSize) / 2)
+  const overhangY = Math.max(0, (sprite.height * scale - hitboxSize) / 2)
+  const b = PLAYABLE_BOUNDS
+  const limits = new Phaser.Geom.Rectangle(b.left + overhangX, b.top + overhangY,
+    b.right - b.left - 2 * overhangX, b.bottom - b.top - 2 * overhangY)
+  body.setBoundsRectangle(limits)
+  body.setCollideWorldBounds(true)
 }

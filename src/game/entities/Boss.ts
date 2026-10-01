@@ -53,11 +53,18 @@ export class Boss extends Enemy {
     }
 
     const direction = new Phaser.Math.Vector2(targetX - this.x, targetY - this.y).normalize().scale(75)
-    this.setVelocity(direction.x, direction.y)
+    this.moveAroundObstacles(direction.x, direction.y, { x: targetX, y: targetY })
+  }
+
+  hitObstacle() {
+    if (this.phase !== 'CHARGE') return
+    this.setVelocity(0, 0)
+    this.finishSpecial(this.scene.time.now)
   }
 
   private finishSpecial(now: number) {
     this.phase = 'NORMAL'
+    this.detour = undefined
     this.nextSpecial = now + 4000
   }
 }

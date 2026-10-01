@@ -1,10 +1,11 @@
 import type Phaser from 'phaser'
+import { ARENA_WIDTH, ARENA_HEIGHT, WALL_THICKNESS } from './ArenaBounds.ts'
+import { ARENA_OBSTACLES } from './ArenaObstacles'
 
 const ASSETS = [
-  'floor-base', 'floor-worn', 'floor-cracked', 'floor-grate', 'floor-stripes', 'floor-vent',
+  'floor-base', 'floor-worn', 'floor-cracked', 'floor-grate', 'floor-stripes',
   'wall-bottom', 'wall-left', 'wall-corner',
-  'prop-container', 'prop-crates', 'prop-barrels', 'prop-terminal', 'prop-pipes', 'prop-machine',
-  'light-blue', 'light-red', 'debris-smaill', 'debris-large', 'cable',
+  'prop-container', 'prop-crates', 'prop-machine',
 ] as const
 
 // Non-destructive frames remove empty padding; wall-top is excluded because its
@@ -46,20 +47,14 @@ export function createArena(scene: Phaser.Scene) {
     ['floor-grate', 670, 510, 110, 180, -25],
     ['floor-stripes', 150, 125, 100, 0, -24],
     ['floor-stripes', 650, 465, 100, 180, -24],
-    ['floor-vent', 735, 270, 62, 0, -24],
-    ['cable', 95, 410, 110, -25, -23],
-    ['debris-smaill', 690, 120, 76, 0, -22],
-    ['debris-large', 110, 520, 100, 0, -22],
-    ['prop-container', 290, 48, 95, 0, -15],
-    ['prop-crates', 60, 185, 72, 0, -15],
-    ['prop-barrels', 745, 395, 68, 0, -15],
-    ['prop-terminal', 63, 290, 67, 0, -15],
-    ['prop-pipes', 500, 560, 125, 0, -15],
-    ['prop-machine', 700, 55, 105, 0, -15],
-    ['light-blue', 210, 55, 52, 0, -14],
-    ['light-blue', 565, 550, 52, 0, -14],
-    ['light-red', 55, 520, 48, 0, -14],
+    ['floor-grate', 110, 520, 100, 0, -25],
+    ['floor-grate', 745, 395, 68, 90, -25],
+    ['floor-grate', 63, 290, 67, 90, -25],
   ]
+  for (const o of ARENA_OBSTACLES) {
+    const image = scene.add.image(o.x, o.y, `arena-${o.asset}`)
+    image.setScale(o.size / Math.max(image.width, image.height)).setTint(0xa6b1bb).setDepth(-15)
+  }
   for (const [name, x, y, size, angle, depth] of decor) {
     const image = scene.add.image(x, y, `arena-${name}`, name in FRAMES ? 'trimmed' : undefined)
     image.setScale(size / Math.max(image.width, image.height))
@@ -67,20 +62,21 @@ export function createArena(scene: Phaser.Scene) {
   }
 
   // Four tiled strips, only 14 px deep: no oversized walls covering edge spawns.
-  for (const y of [7, 593]) {
-    scene.add.tileSprite(400, y, 800, 14, 'arena-wall-bottom', 'trimmed')
-      .setTileScale(14 / FRAMES['wall-bottom'][3]).setFlipY(y === 7).setDepth(-10)
+  for (const y of [WALL_THICKNESS / 2, ARENA_HEIGHT - WALL_THICKNESS / 2]) {
+    scene.add.tileSprite(ARENA_WIDTH / 2, y, ARENA_WIDTH, WALL_THICKNESS, 'arena-wall-bottom', 'trimmed')
+      .setTileScale(WALL_THICKNESS / FRAMES['wall-bottom'][3]).setFlipY(y === WALL_THICKNESS / 2).setDepth(-10)
   }
-  for (const x of [7, 793]) {
-    scene.add.tileSprite(x, 300, 14, 600, 'arena-wall-left', 'trimmed')
-      .setTileScale(14 / FRAMES['wall-left'][2]).setFlipX(x === 793).setDepth(-10)
+  for (const x of [WALL_THICKNESS / 2, ARENA_WIDTH - WALL_THICKNESS / 2]) {
+    scene.add.tileSprite(x, ARENA_HEIGHT / 2, WALL_THICKNESS, ARENA_HEIGHT, 'arena-wall-left', 'trimmed')
+      .setTileScale(WALL_THICKNESS / FRAMES['wall-left'][2]).setFlipX(x > ARENA_WIDTH / 2).setDepth(-10)
   }
+  const cornerCenter = WALL_THICKNESS / 2
   for (const [x, y, flipX, flipY] of [
-    [10, 10, false, false], [790, 10, true, false],
-    [10, 590, false, true], [790, 590, true, true],
+    [cornerCenter, cornerCenter, false, false], [ARENA_WIDTH - cornerCenter, cornerCenter, true, false],
+    [cornerCenter, ARENA_HEIGHT - cornerCenter, false, true], [ARENA_WIDTH - cornerCenter, ARENA_HEIGHT - cornerCenter, true, true],
   ] as const) {
     const corner = scene.add.image(x, y, 'arena-wall-corner', 'trimmed')
-    corner.setScale(20 / Math.max(corner.width, corner.height))
+    corner.setScale(WALL_THICKNESS / Math.max(corner.width, corner.height))
       .setFlip(flipX, flipY).setDepth(-9)
   }
 }

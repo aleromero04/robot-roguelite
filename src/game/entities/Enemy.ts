@@ -1,4 +1,6 @@
 import Phaser from 'phaser'
+import { blocksPath, findLocalDetour } from '../environment/ArenaObstacles'
+import type { Point, Detour } from '../environment/ArenaObstacles'
 import { configureCharacter } from '../visuals/characters'
 
 export type EnemyType = 'basic' | 'runner' | 'shooter'
@@ -19,6 +21,8 @@ const ENEMY_STATS = {
 
 
 export class Enemy extends Phaser.Physics.Arcade.Sprite {
+  protected detour?: Detour
+  private readonly navigationHalfSize: number
   private readonly enemyType: EnemyType
   private readonly shotCooldown = 1500
   private nextShotTime: number
@@ -41,6 +45,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     super(scene, x, y, stats.texture)
     this.enemyType = typeof type === 'string' ? type : 'basic'
     this.nextShotTime = scene.time.now + this.shotCooldown
+    this.navigationHalfSize = (stats.size ?? 40) / 2
     this.health = stats.health
     this.maxHealth = stats.health
     this.speed = stats.speed
@@ -50,8 +55,6 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     scene.physics.add.existing(this)
 
     configureCharacter(this, stats.size ?? 40)
-    this.setImmovable(true)
-    if (type === 'shooter') this.setCollideWorldBounds(true)
   }
 
   updateBehavior(targetX: number, targetY: number, fire: () => void) {
@@ -72,7 +75,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
     }
 
     if (this.rangeMovement === 'hold') {
-      this.setVelocity(0, 0)
+      this.moveAroundObstacles(0, 0)
       if (this.scene.time.now >= this.nextShotTime) {
         this.nextShotTime = this.scene.time.now + this.shotCooldown
         fire()
@@ -82,7 +85,10 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
       // At coincident positions, choose a stable escape direction.
       const x = distance > 0 ? dx / distance : 1
       const y = distance > 0 ? dy / distance : 0
-      this.setVelocity(x * this.speed * sign, y * this.speed * sign)
+      this.moveAroundObstacles(x * this.speed * sign, y * this.speed * sign,
+        sign === 1 ? { x: targetX, y: targetY } : {
+          x: this.x - x * (220 - distance), y: this.y - y * (220 - distance),
+        })
     }
   }
 
@@ -104,7 +110,7 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
 
     const direction = new Phaser.Math.Vector2(targetX - this.x, targetY - this.y)
     if (direction.lengthSq() < 1) {
-      this.setVelocity(0, 0)
+      this.moveAroundObstacles(0, 0)
       return
     }
 
@@ -116,7 +122,31 @@ export class Enemy extends Phaser.Physics.Arcade.Sprite {
       directY + directX * this.lateralBias,
     ).normalize().scale(this.speed)
 
-    this.setVelocity(direction.x, direction.y)
+    this.moveAroundObstacles(direction.x, direction.y, { x: targetX, y: targetY })
+  }
+
+  protected moveAroundObstacles(vx: number, vy: number, target?: Point) {
+    const speed = Math.hypot(vx, vy)
+    if (!speed) { this.detour = undefined; this.setVelocity(0, 0); return }
+    // Persist while blocked, but release immediately when the body's direct route clears.
+    if (this.detour && (
+      (target && !blocksPath(this, target, this.navigationHalfSize, this.detour.obstacle)) ||
+      Math.hypot(this.detour.x - this.x, this.detour.y - this.y) <= 3
+    )) {
+      this.detour = undefined
+    }
+    this.detour ??= findLocalDetour(this, { x: vx, y: vy }, this.navigationHalfSize, target, {
+      x: Math.max(this.navigationHalfSize, (this.displayWidth || 0) / 2),
+      y: Math.max(this.navigationHalfSize, (this.displayHeight || 0) / 2),
+    })
+    if (this.detour) {
+      const dx = this.detour.x - this.x, dy = this.detour.y - this.y
+      const distance = Math.hypot(dx, dy)
+      // Aim at the corner while preserving the enemy's total speed.
+      this.setVelocity(dx / distance * speed, dy / distance * speed)
+    } else {
+      this.setVelocity(vx, vy)
+    }
   }
 
   applyBurn() {

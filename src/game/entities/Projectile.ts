@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { PLAYABLE_BOUNDS } from '../environment/ArenaBounds.ts'
 import type { Enemy } from './Enemy'
 
 export interface ProjectileAbilities {
@@ -32,6 +33,7 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
 
     scene.add.existing(this)
     scene.physics.add.existing(this)
+    this.setCollideWorldBounds(true)
 
     this.aimAt(targetX, targetY)
   }
@@ -106,16 +108,16 @@ export class Projectile extends Phaser.Physics.Arcade.Sprite {
     super.preUpdate(time, delta)
     this.updateHoming(delta)
 
-    const bounds = this.scene.physics.world.bounds
+    const bounds = PLAYABLE_BOUNDS
     const halfWidth = this.displayWidth / 2
     const halfHeight = this.displayHeight / 2
 
-    // Remove missed shots once they have completely left the arena.
+    // Arcade clamps at the inner wall; remove on contact, never behind it.
     if (
-      this.x + halfWidth < bounds.left ||
-      this.x - halfWidth > bounds.right ||
-      this.y + halfHeight < bounds.top ||
-      this.y - halfHeight > bounds.bottom
+      this.x - halfWidth <= bounds.left ||
+      this.x + halfWidth >= bounds.right ||
+      this.y - halfHeight <= bounds.top ||
+      this.y + halfHeight >= bounds.bottom
     ) {
       this.destroy()
     }

@@ -1,4 +1,5 @@
 import Phaser from 'phaser'
+import { PLAYABLE_BOUNDS } from '../environment/ArenaBounds.ts'
 
 export class EnemyProjectile extends Phaser.Physics.Arcade.Sprite {
   readonly damage = 1
@@ -8,17 +9,18 @@ export class EnemyProjectile extends Phaser.Physics.Arcade.Sprite {
     super(scene, x, y, 'enemy-projectile')
     scene.add.existing(this)
     scene.physics.add.existing(this)
+    this.setCollideWorldBounds(true)
     const direction = new Phaser.Math.Vector2(targetX - x, targetY - y).normalize()
     this.setVelocity(direction.x * this.speed, direction.y * this.speed)
   }
 
   preUpdate(time: number, delta: number) {
     super.preUpdate(time, delta)
-    const bounds = this.scene.physics.world.bounds
+    const bounds = PLAYABLE_BOUNDS
     const halfWidth = this.displayWidth / 2
     const halfHeight = this.displayHeight / 2
-    if (this.x + halfWidth < bounds.left || this.x - halfWidth > bounds.right ||
-        this.y + halfHeight < bounds.top || this.y - halfHeight > bounds.bottom) {
+    if (this.x - halfWidth <= bounds.left || this.x + halfWidth >= bounds.right ||
+        this.y - halfHeight <= bounds.top || this.y + halfHeight >= bounds.bottom) {
       this.destroy()
     }
   }

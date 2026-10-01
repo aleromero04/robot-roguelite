@@ -1,11 +1,12 @@
 import Phaser from 'phaser'
 import './style.css'
+import { ARENA_WIDTH, ARENA_HEIGHT } from './game/environment/ArenaBounds.ts'
 import { GameScene } from './game/scenes/GameScene'
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
-  width: 800,
-  height: 600,
+  width: ARENA_WIDTH,
+  height: ARENA_HEIGHT,
   parent: 'app',
 
   physics: {

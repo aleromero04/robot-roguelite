@@ -1,4 +1,6 @@
 import Phaser from 'phaser'
+import { PLAYABLE_BOUNDS } from '../environment/ArenaBounds.ts'
+import { createObstacles, isSpawnClear } from '../environment/ArenaObstacles'
 import { preloadArena, createArena } from '../environment/ArenaVisuals'
 import { CHARACTERS, getCharacterSpawnMargin } from '../visuals/characters'
 import { Player } from '../entities/Player'
@@ -65,11 +67,23 @@ export class GameScene extends Phaser.Scene {
     if (!this.textures.exists('projectile')) projectileGraphics.generateTexture('projectile', 10, 10)
     projectileGraphics.destroy()
 
-    this.physics.world.setBounds(0, 0, 800, 600)
+    this.physics.world.setBounds(PLAYABLE_BOUNDS.left, PLAYABLE_BOUNDS.top,
+      PLAYABLE_BOUNDS.right - PLAYABLE_BOUNDS.left, PLAYABLE_BOUNDS.bottom - PLAYABLE_BOUNDS.top)
     this.player = new Player(this, 400, 300)
     this.enemies = this.add.group()
     this.projectiles = this.add.group()
     this.enemyProjectiles = this.add.group()
+    const obstacles = createObstacles(this)
+    this.physics.add.collider(this.player, obstacles)
+    this.physics.add.collider(this.enemies, obstacles, enemy => {
+      if (enemy instanceof Boss) enemy.hitObstacle()
+    })
+    // Registered before damage overlaps: obstacle hits never trigger projectile skills.
+    for (const group of [this.projectiles, this.enemyProjectiles]) {
+      this.physics.add.collider(group, obstacles, projectile => {
+        if (projectile instanceof Projectile || projectile instanceof EnemyProjectile) projectile.destroy()
+      })
+    }
     this.healthText = this.add.text(16, 16, `HP: ${this.player.getHealth()} / ${this.player.getMaxHealth()}`, {
       fontSize: '24px',
       color: '#ffffff',
@@ -288,7 +302,7 @@ export class GameScene extends Phaser.Scene {
     if (wave === 7) {
       this.stopCombat()
       this.enemies.clear(true, true)
-      const bounds = this.physics.world.bounds
+      const bounds = PLAYABLE_BOUNDS
       const margin = getCharacterSpawnMargin('enemy-boss', 80)
       const corners = [
         { x: bounds.left + margin.x, y: bounds.top + margin.y },
@@ -296,9 +310,10 @@ export class GameScene extends Phaser.Scene {
         { x: bounds.left + margin.x, y: bounds.bottom - margin.y },
         { x: bounds.right - margin.x, y: bounds.bottom - margin.y },
       ]
-      corners.sort((a, b) => Phaser.Math.Distance.BetweenPointsSquared(b, this.player) -
+      const validCorners = corners.filter(p => isSpawnClear(p.x, p.y, margin.x, margin.y))
+      validCorners.sort((a, b) => Phaser.Math.Distance.BetweenPointsSquared(b, this.player) -
         Phaser.Math.Distance.BetweenPointsSquared(a, this.player))
-      this.enemies.add(new Boss(this, corners[0].x, corners[0].y))
+      this.enemies.add(new Boss(this, validCorners[0].x, validCorners[0].y))
     } else {
       this.spawnNextGroup()
     }
@@ -390,7 +405,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private spawnGroup(composition: readonly EnemyType[]) {
-    const bounds = this.physics.world.bounds
+    const bounds = PLAYABLE_BOUNDS
     const minDistance = 60
     const maxAttempts = 100
     const isAwayFromPlayer = (x: number, y: number) =>
@@ -408,6 +423,7 @@ export class GameScene extends Phaser.Scene {
       const right = bounds.right - margin.x
       const top = bounds.top + margin.y
       const bottom = bounds.bottom - margin.y
+      const isSafe = (x: number, y: number) => isAwayFromPlayer(x, y) && isSpawnClear(x, y, margin.x, margin.y)
       let position: { x: number; y: number } | undefined
 
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -415,7 +431,7 @@ export class GameScene extends Phaser.Scene {
         const x = edge === 2 ? left : edge === 3 ? right : Phaser.Math.Between(left, right)
         const y = edge === 0 ? top : edge === 1 ? bottom : Phaser.Math.Between(top, bottom)
 
-        if (isSeparated(x, y)) {
+        if (isSafe(x, y) && isSeparated(x, y)) {
           position = { x, y }
           break
         }
@@ -430,8 +446,8 @@ export class GameScene extends Phaser.Scene {
         for (let y = top; y <= bottom; y += minDistance) {
           candidates.push({ x: left, y }, { x: right, y })
         }
-        position = candidates.find(({ x, y }) => isSeparated(x, y)) ??
-          candidates.find(({ x, y }) => isAwayFromPlayer(x, y))
+        position = candidates.find(({ x, y }) => isSafe(x, y) && isSeparated(x, y)) ??
+          candidates.find(({ x, y }) => isSafe(x, y))
       }
 
       if (!position) {

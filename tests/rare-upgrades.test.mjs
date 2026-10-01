@@ -3,6 +3,8 @@ import test from 'node:test'
 import fs from 'node:fs'
 import vm from 'node:vm'
 import ts from 'typescript'
+import * as arenaBounds from '../src/game/environment/ArenaBounds.ts'
+import * as obstacles from '../src/game/environment/ArenaObstacles.ts'
 import { createRequire } from 'node:module'
 const ArcadeBody = createRequire(import.meta.url)('../node_modules/phaser/src/physics/arcade/Body.js')
 class Sprite {
@@ -25,8 +27,8 @@ class Vector2 {
   scale(n) { this.x*=n;this.y*=n;return this }
   normalize() { const n=Math.hypot(this.x,this.y);if(n){this.x/=n;this.y/=n}return this }
 }
-const phaser={TintModes:{FILL:1},Scene:class {},Physics:{Arcade:{Sprite}},Math:{Vector2,Between:(min,max)=>Math.floor(Math.random()*(max-min+1))+min,Distance:{BetweenPointsSquared:(a,b)=>(a.x-b.x)**2+(a.y-b.y)**2}}}
-const modules={'../environment/ArenaVisuals':{preloadArena(){},createArena(){}},'../visuals/characters':{configureCharacter(){},CHARACTERS:{}}}
+const phaser={Geom:{Rectangle:createRequire(import.meta.url)('../node_modules/phaser/src/geom/rectangle/Rectangle.js')},TintModes:{FILL:1},Scene:class {},Physics:{Arcade:{Sprite}},Math:{Vector2,Between:(min,max)=>Math.floor(Math.random()*(max-min+1))+min,Distance:{BetweenPointsSquared:(a,b)=>(a.x-b.x)**2+(a.y-b.y)**2}}}
+const modules={'../environment/ArenaBounds.ts':arenaBounds,'../environment/ArenaObstacles':obstacles,'../environment/ArenaVisuals':{preloadArena(){},createArena(){}},'../visuals/characters':{configureCharacter(){},CHARACTERS:{}}}
 const graphics=()=>({clear(){},fillStyle(){},fillRect(){},setDepth(){return this}})
 function load(path,name) {
   const context={exports:{},require:id=>id==='phaser'?phaser:modules[id]??{}}
@@ -246,13 +248,13 @@ test('Shooter range hysteresis, stats, cooldown and death',()=>{
  e.applyBurn();e.takeDamage(2);e.updateBurn(9000);s.time.now=9000;e.updateBehavior(250,0,fire)
  assert.equal(shots,2);assert.equal(e.burnTicksRemaining,0)
 })
-test('EnemyProjectile keeps a straight 250 px/s trajectory and exits completely before cleanup',()=>{
+test('EnemyProjectile keeps a straight 250 px/s trajectory and stops at the playable wall',()=>{
  const s=scene();s.physics.world={bounds:{left:0,right:800,top:0,bottom:600}}
  const p=new EnemyProjectile(s,400,300,700,300);p.displayWidth=12;p.displayHeight=12
  assert.equal(p.damage,1);assert.equal(p.velocity.x,250);assert.equal(p.velocity.y,0)
  p.preUpdate(100,100);assert.equal(p.velocity.x,250);assert.equal(p.velocity.y,0)
- p.x=805;p.preUpdate(200,100);assert.equal(p.active,true)
- p.x=807;p.preUpdate(300,100);assert.equal(p.active,false)
+ p.x=779;p.preUpdate(200,100);assert.equal(p.active,true)
+ p.x=780;p.preUpdate(300,100);assert.equal(p.active,false)
 })
 test('shared damage coordinator delegates to Player, updates UI, respects survival and stops combat on death',()=>{
  const s=new GameScene();let calls=0,ui=0,stopped=0,alive=true,accepted=true
@@ -383,7 +385,7 @@ test('missing or already-hit bounce target uses only Piercing and cannot cause r
 test('Boss normal speed, fixed charge vector, duration and special recovery',()=>{
  const s=scene(),boss=new Boss(s,100,100);let shots=0
  assert.equal(boss.health,40);assert.equal(boss.contactDamage,2)
- boss.updateBehavior(200,100,()=>shots++);assert.equal(boss.velocity.x,75)
+ boss.updateBehavior(200,100,()=>shots++);assert.ok(Math.abs(Math.hypot(boss.velocity.x,boss.velocity.y)-75)<1e-9)
  const random=phaser.Math.Between;phaser.Math.Between=()=>0
  try {
   s.time.now=4000;boss.updateBehavior(200,100,()=>shots++);assert.equal(boss.velocity.x,230)
@@ -420,15 +422,22 @@ test('boss spawn, victory cleanup, no upgrade and PLAY AGAIN requests scene rest
  f.cards.at(-1).click();f.cards.at(-1).click();assert.equal(restarts,1);assert.equal(f.s.state,'START')
 })
 
+function setupSceneCreation(s) {
+ const colliders=[]
+ s.cameras={main:{setBackgroundColor(){}}}
+ s.physics.world.setBounds=()=>{};s.physics.add.overlap=()=>{};s.physics.add.collider=(a,b,callback)=>colliders.push({a,b,callback})
+ s.physics.add.staticGroup=()=>({add(){}})
+ s.add.rectangle=()=>({setVisible(){return this}})
+ const textures=new Set();s.textures={exists:key=>textures.has(key),get:()=>({has:()=>true})}
+ s.make={graphics:()=>({fillStyle(){},fillRect(){},fillCircle(){},generateTexture(key){assert.equal(textures.has(key),false);textures.add(key)},destroy(){}})}
+ s.add.group=()=>({getChildren:()=>[],countActive:()=>0})
+ return colliders
+}
 test('create after restart resets run fields and creates a fresh Player and empty groups',()=>{
  const f=waveFixture(),s=f.s
  s.player.applyUpgrade('power-trio');s.player.applyUpgrade('revive');s.player.applyUpgrade('energy-shield')
  const oldPlayer=s.player;s.currentWave=7;s.nextGroupIndex=3;s.lastShotTime=9000;s.state='VICTORY'
- s.cameras={main:{setBackgroundColor(){}}}
- s.physics.world.setBounds=()=>{};s.physics.add.overlap=()=>{}
- const textures=new Set();s.textures={exists:key=>textures.has(key),get:()=>({has:()=>true})}
- s.make={graphics:()=>({fillStyle(){},fillRect(){},fillCircle(){},generateTexture(key){assert.equal(textures.has(key),false);textures.add(key)},destroy(){}})}
- s.add.group=()=>({getChildren:()=>[],countActive:()=>0})
+ setupSceneCreation(s)
  for(let i=0;i<2;i++) {
   s.create()
   assert.notEqual(s.player,oldPlayer);assert.equal(s.state,'START');assert.equal(s.currentWave,1);assert.equal(s.nextGroupIndex,0);assert.equal(s.lastShotTime,0)
@@ -532,8 +541,8 @@ test('real Arcade postUpdate preserves initial and reinforcement spawns in W3-W5
    }
    const check=(items)=>{
     for(const e of items) {
-     assert.ok(e.x-e.displayWidth/2>=-1e-9 && e.x+e.displayWidth/2<=800+1e-9)
-     assert.ok(e.y-e.displayHeight/2>=-1e-9 && e.y+e.displayHeight/2<=600+1e-9)
+     assert.ok(e.x-e.displayWidth/2>=14-1e-9 && e.x+e.displayWidth/2<=786+1e-9)
+     assert.ok(e.y-e.displayHeight/2>=14-1e-9 && e.y+e.displayHeight/2<=586+1e-9)
      assert.ok(Math.abs(e.body.width-40)<1e-9 && Math.abs(e.body.height-40)<1e-9)
      assert.ok(Math.hypot(e.x-f.s.player.x,e.y-f.s.player.y)>=280-1e-9)
     }
@@ -578,4 +587,138 @@ test('crowded edge fallback relaxes enemy separation, never arena bounds or play
   assert.ok(e.x>=27&&e.x<=773&&e.y>=25&&e.y<=575)
   assert.ok(Math.hypot(e.x-400,e.y-300)>=280)
  } finally {phaser.Math.Between=original}
+})
+
+test('local avoidance guides Basic and Runner around each solid prop without changing speed',()=>{
+ const original=phaser.Math.Between
+ phaser.Math.Between=min=>min
+ try {
+  for(const type of ['basic','runner'])for(const box of obstacles.OBSTACLE_BOUNDS) {
+   for(const axis of ['x','y'])for(const sign of [-1,1]) {
+    const s=scene(),cx=(box.left+box.right)/2,cy=(box.top+box.bottom)/2
+    const e=new Enemy(s,axis==='x'?(sign===1?box.left-80:box.right+80):cx,axis==='y'?(sign===1?box.top-65:box.bottom+65):cy,type)
+    const goal={x:axis==='x'?(sign===1?box.right+90:box.left-90):cx,y:axis==='y'?(sign===1?box.bottom+90:box.top-90):cy}
+    let arrived=false
+    for(let frame=0;frame<900;frame++) {
+     s.time.now=frame*1000/60;e.chase(goal.x,goal.y)
+     assert.ok(Math.abs(Math.hypot(e.velocity.x,e.velocity.y)-(type==='basic'?90:160))<1e-8)
+     e.x+=e.velocity.x/60;e.y+=e.velocity.y/60
+     assert.ok(!obstacles.OBSTACLE_BOUNDS.some(b=>e.x+20>b.left&&e.x-20<b.right&&e.y+20>b.top&&e.y-20<b.bottom),type+' overlapped prop')
+     if(Math.hypot(e.x-goal.x,e.y-goal.y)<8){arrived=true;break}
+    }
+    assert.ok(arrived,type+' failed to skirt '+axis+' face')
+   }
+  }
+ } finally {phaser.Math.Between=original}
+})
+
+test('scene registers static blocking and destroys both projectile types without triggering skills',()=>{
+ const f=waveFixture(),colliders=setupSceneCreation(f.s)
+ f.s.create()
+ assert.equal(colliders.length,4)
+ assert.equal(colliders[0].a,f.s.player)
+ assert.equal(colliders[1].a,f.s.enemies)
+ assert.equal(colliders[2].a,f.s.projectiles)
+ assert.equal(colliders[3].a,f.s.enemyProjectiles)
+ const s=scene(),target=new Enemy(s,100,100)
+ const projectile=shot(s,{piercing:true,ricochet:true,flame:true})
+ projectile.enableHoming(target,()=>target)
+ colliders[2].callback(projectile)
+ assert.equal(projectile.active,false);assert.equal(projectile.canRicochet(),true)
+ assert.equal(projectile.hit(target,1),false);assert.equal(target.health,3)
+ const enemyProjectile=new EnemyProjectile(s,0,0,100,0)
+ colliders[3].callback(enemyProjectile);assert.equal(enemyProjectile.active,false)
+ const boss=new Boss(s,100,100),random=phaser.Math.Between
+ try {
+  phaser.Math.Between=()=>0;s.time.now=4000;boss.updateBehavior(500,100,()=>{})
+  assert.equal(boss.phase,'CHARGE')
+  colliders[1].callback(boss)
+  assert.equal(boss.phase,'NORMAL');assert.equal(boss.nextSpecial,8000)
+  assert.equal(boss.velocity.x,0);assert.equal(boss.velocity.y,0)
+  s.time.now=4016;boss.updateBehavior(500,100,()=>{})
+  assert.ok(Math.abs(Math.hypot(boss.velocity.x,boss.velocity.y)-75)<1e-8)
+ } finally {phaser.Math.Between=random}
+})
+test('all real wave groups and boss spawns avoid the obstacle visual footprints, including fallback',()=>{
+ const random=phaser.Math.Between
+ try {
+  for(const fallback of [false,true]) {
+   if(fallback)phaser.Math.Between=min=>min
+   for(const wave of [1,2,3,4,5,6,7]) {
+    const f=waveFixture();f.s.startWave(wave)
+    const check=()=>f.items.filter(e=>e.active).forEach(e=>{
+     const margin=modules['../visuals/characters'].getCharacterSpawnMargin(e.texture,e instanceof Boss?80:40)
+     assert.equal(obstacles.isSpawnClear(e.x,e.y,margin.x,margin.y),true)
+    })
+    check()
+    if(wave===7)continue
+    for(const group of WAVES[wave].groups.slice(1)){
+     f.killTo(group.spawnAtAlive);f.s.update(0);check()
+    }
+   }
+  }
+ } finally {phaser.Math.Between=random}
+})
+test('Shooter preserves retreat, hold and fire decisions while detouring',()=>{
+ const s=scene(),e=new Enemy(s,520,174,'shooter')
+ let shots=0
+ // Player nearby on the left: retreat to the right is blocked by the machine.
+ e.updateBehavior(420,174,()=>shots++)
+ assert.equal(e.rangeMovement,'retreat')
+ assert.ok(Math.abs(Math.hypot(e.velocity.x,e.velocity.y)-70)<1e-8)
+ assert.ok(e.velocity.y!==0)
+ const detour=e.detour
+ s.time.now=100;e.updateBehavior(421,174,()=>shots++)
+ assert.equal(e.detour,detour)
+ s.time.now=1600;e.updateBehavior(280,174,()=>shots++)
+ assert.equal(e.rangeMovement,'hold');assert.equal(shots,1)
+ assert.equal(e.velocity.x,0);assert.equal(e.velocity.y,0);assert.equal(e.detour,undefined)
+})
+
+test('Basic, Runner and approaching Shooter release a detour as soon as the full body route clears',()=>{
+ for(const type of ['basic','runner','shooter']) {
+  const s=scene(),e=new Enemy(s,180,143,type)
+  const goalX=type==='shooter'?600:400
+  e.updateBehavior(goalX,143,()=>{})
+  const detour=e.detour
+  assert.ok(detour)
+  // Center line clears the prop, but the 40 px body still clips its top edge.
+  e.y=110;e.updateBehavior(goalX,110,()=>{})
+  assert.equal(e.detour,detour)
+  // Body clears with only 2 px clearance: inside the old 6 px avoidance padding.
+  // It must release without waiting for the waypoint or reacquiring the same prop.
+  e.y=101;e.updateBehavior(goalX,101,()=>{})
+  assert.equal(e.detour,undefined)
+  assert.equal(e.velocity.y,0)
+  assert.equal(e.velocity.x,type==='basic'?90:type==='runner'?160:70)
+  e.updateBehavior(goalX,101,()=>{});assert.equal(e.detour,undefined)
+ }
+})
+test('moving target clears pursuit immediately; retreating Shooter checks its escape route',()=>{
+ const s=scene(),e=new Enemy(s,180,143)
+ e.updateBehavior(400,143,()=>{});assert.ok(e.detour)
+ e.updateBehavior(100,143,()=>{});assert.equal(e.detour,undefined);assert.equal(e.velocity.x,-90)
+ const shooter=new Enemy(s,520,174,'shooter')
+ shooter.updateBehavior(420,174,()=>{});assert.ok(shooter.detour)
+ shooter.y=129;shooter.updateBehavior(420,129,()=>{})
+ assert.equal(shooter.rangeMovement,'retreat')
+ assert.equal(shooter.detour,undefined)
+ assert.equal(shooter.velocity.x,70);assert.ok(Math.abs(shooter.velocity.y)<1e-9)
+})
+
+test('both projectile types disappear at each interior wall, including upgraded player shots',()=>{
+ const b=arenaBounds.PLAYABLE_BOUNDS
+ for(const enemy of [false,true])for(const side of ['left','right','top','bottom']) {
+  const s=scene(),p=enemy?new EnemyProjectile(s,400,300,700,300):shot(s,{piercing:true,ricochet:true,flame:true})
+  const half=enemy?6:5;p.displayWidth=half*2;p.displayHeight=half*2
+  if(!enemy)p.enableHoming(new Enemy(s,500,300),()=>undefined)
+  p.x=side==='left'?b.left+half+1:side==='right'?b.right-half-1:400
+  p.y=side==='top'?b.top+half+1:side==='bottom'?b.bottom-half-1:300
+  p.preUpdate(0,0);assert.equal(p.active,true)
+  if(side==='left')p.x--
+  if(side==='right')p.x++
+  if(side==='top')p.y--
+  if(side==='bottom')p.y++
+  p.preUpdate(0,0);assert.equal(p.active,false)
+ }
 })
